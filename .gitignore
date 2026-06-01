@@ -1,0 +1,19 @@
+# Rust build
+target/
+
+# IDE & editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+.DS_Store
+Thumbs.db
+*.~
+
+# Environment
+.env
+.env.local

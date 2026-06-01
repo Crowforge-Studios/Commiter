@@ -1,0 +1,13 @@
+[package]
+name = "commiter"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A Rust TUI app that generates commit messages from git diffs using opencode CLI"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+git2 = { version = "0.19", features = ["vendored-libgit2"] }
+arboard = "3"
+anyhow = "1"
