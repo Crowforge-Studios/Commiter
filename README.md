@@ -1,8 +1,13 @@
 # Commiter
 
-A minimal Rust TUI app that inspects the current Git repository, generates a
+A Rust TUI app that inspects the current Git repository, generates a
 short imperative commit message via the [opencode CLI](https://opencode.ai), copies it
 to the system clipboard, and optionally stages & commits all changes.
+
+Features:
+- **Keyboard-driven** ratatui interface with title bar, branch name, file list, and spinner
+- **AI version detection** — when the repo has semver tags or a Cargo.toml version, the AI also suggests the next version (major/minor/patch bump)
+- **UTF-8 safe** diff truncation at 8 KiB
 
 ## Requirements
 
@@ -38,6 +43,7 @@ The UI is keyboard-only:
 | Key      | Action                      |
 | -------- | --------------------------- |
 | `Enter`  | Activate the focused button |
+| `F1`     | Toggle file list visibility |
 | `q`      | Quit                        |
 
 ### Workflow
@@ -48,6 +54,14 @@ The UI is keyboard-only:
    returned message to the clipboard.
 4. A second button, **Commit changes**, appears. Press **Enter** to stage all
    changes and commit with the generated message.
+
+### Version detection
+
+If your project has semver git tags (e.g. `v1.0.0`) or a `version` field in
+`Cargo.toml`, the AI prompt includes version-aware instructions. The model
+returns a suggested next version alongside the commit message, displayed
+in the UI. This only activates when a version history exists — unversioned
+projects are unaffected.
 
 ## AI Model
 
@@ -84,12 +98,25 @@ header is used and a note is appended:
 Note: diff was truncated. Output only the commit message anyway.
 ```
 
+When version detection is active, the prompt also includes:
+
+```
+Current version: v1.0.0
+Analyze the changes and determine the next semantic version:
+- Breaking changes / major rewrites -> bump major (e.g. v1 -> v2.0.0)
+- New features -> bump minor (e.g. v1.0 -> v1.1.0)
+- Bug fixes / refactors / chores -> bump patch (e.g. v1.0.0 -> v1.0.1)
+Output format (exactly two lines):
+<commit message>
+Next version: <version>
+```
+
 ## Diff size cutoff
 
 The combined staged + unstaged diff sent to the AI model is capped at
 **8192 bytes** (defined as `DIFF_CUTOFF` in `src/git.rs`). If the diff is
-larger, it is truncated and a `[diff truncated]` indicator is shown both in
-the UI and in the prompt sent to opencode.
+larger, it is truncated at a UTF-8 character boundary and a `[diff truncated]`
+indicator is shown both in the UI and in the prompt sent to opencode.
 
 This keeps prompt sizes reasonable and avoids hitting token limits.
 

@@ -1,6 +1,6 @@
 [package]
 name = "commiter"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 description = "A Rust TUI app that generates commit messages from git diffs using opencode CLI"

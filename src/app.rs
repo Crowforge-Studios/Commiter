@@ -5,6 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
+use std::time::Instant;
 
 use crate::git::RepoInfo;
 
@@ -19,6 +20,10 @@ pub enum AppState {
 /// Events produced by background threads and consumed by the main loop.
 pub enum AppEvent {
     Generated(String),
+    GeneratedWithVersion {
+        message: String,
+        suggested_version: Option<String>,
+    },
     Committed(String),
     Error(String),
 }
@@ -28,8 +33,11 @@ pub struct App {
     pub repo_info: Option<RepoInfo>,
     pub init_error: Option<String>,
     pub commit_message: String,
+    pub suggested_version: Option<String>,
     pub status_line: String,
     pub commit_hash: Option<String>,
+    pub spinner_start: Instant,
+    pub show_file_list: bool,
 }
 
 impl App {
@@ -41,13 +49,30 @@ impl App {
                 } else {
                     String::new()
                 };
+                let current_version = crate::git::detect_current_version();
+                let status = if let Some(ref ver) = current_version {
+                    if status.is_empty() {
+                        format!("Current version: {} | Press Enter to generate a message", ver)
+                    } else {
+                        format!("{} | Current version: {}", status, ver)
+                    }
+                } else {
+                    if status.is_empty() {
+                        "Press Enter to generate a commit message".to_string()
+                    } else {
+                        status
+                    }
+                };
                 Self {
                     state: AppState::Idle,
                     repo_info: Some(info),
                     init_error: None,
                     commit_message: String::new(),
+                    suggested_version: None,
                     status_line: status,
                     commit_hash: None,
+                    spinner_start: Instant::now(),
+                    show_file_list: true,
                 }
             }
             Err(e) => Self {
@@ -55,8 +80,11 @@ impl App {
                 repo_info: None,
                 init_error: Some(format!("{} — press 'q' to quit", e)),
                 commit_message: String::new(),
+                suggested_version: None,
                 status_line: String::new(),
                 commit_hash: None,
+                spinner_start: Instant::now(),
+                show_file_list: true,
             },
         }
     }
@@ -64,7 +92,7 @@ impl App {
     pub fn can_generate(&self) -> bool {
         self.state == AppState::Idle
             && self.init_error.is_none()
-            && self.repo_info.as_ref().map_or(false, |r| r.has_changes)
+            && self.repo_info.as_ref().is_some_and(|r| r.has_changes)
     }
 
     pub fn can_commit(&self) -> bool {
@@ -75,11 +103,13 @@ impl App {
 
     pub fn start_generating(&mut self) {
         self.state = AppState::Loading;
+        self.spinner_start = Instant::now();
         self.status_line = "Generating commit message...".to_string();
     }
 
     pub fn start_committing(&mut self) {
         self.state = AppState::Committing;
+        self.spinner_start = Instant::now();
         self.status_line = "Creating commit...".to_string();
     }
 
@@ -87,6 +117,15 @@ impl App {
         match event {
             AppEvent::Generated(msg) => {
                 self.commit_message = msg;
+                self.state = AppState::Ready;
+                self.status_line = "✓ Copied to clipboard".to_string();
+            }
+            AppEvent::GeneratedWithVersion {
+                message,
+                suggested_version,
+            } => {
+                self.commit_message = message;
+                self.suggested_version = suggested_version;
                 self.state = AppState::Ready;
                 self.status_line = "✓ Copied to clipboard".to_string();
             }
@@ -102,7 +141,6 @@ impl App {
             }
             AppEvent::Error(err) => {
                 self.status_line = format!("✗ {}", err);
-                // Return to Idle so the user can retry.
                 self.state = AppState::Idle;
             }
         }
@@ -127,67 +165,66 @@ impl App {
             return;
         }
 
-        let show_commit = matches!(self.state, AppState::Ready | AppState::Committing);
+        let vertical = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Min(2),
+            Constraint::Length(6),
+            Constraint::Length(3),
+            Constraint::Length(1),
+        ]);
+        let [title_area, info_area, version_area, file_area, msg_area, action_area, status_area] =
+            vertical.areas(size);
 
-        let chunks = if show_commit {
-            Layout::vertical([
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Length(3),
-                Constraint::Min(4),
-                Constraint::Length(3),
-                Constraint::Length(1),
-            ])
-            .split(size)
-        } else {
-            Layout::vertical([
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Length(3),
-                Constraint::Min(4),
-                Constraint::Length(1),
-            ])
-            .split(size)
-        };
-
-        self.render_title(f, chunks[0]);
-        self.render_info(f, chunks[1]);
-        self.render_generate_button(f, chunks[2]);
-        self.render_message(f, chunks[3]);
-
-        if show_commit {
-            self.render_commit_button(f, chunks[4]);
-            self.render_status(f, chunks[5]);
-        } else {
-            self.render_status(f, chunks[4]);
-        }
+        self.render_title_bar(f, title_area);
+        self.render_info_line(f, info_area);
+        self.render_version_or_spinner(f, version_area);
+        self.render_file_list(f, file_area);
+        self.render_message(f, msg_area);
+        self.render_actions(f, action_area);
+        self.render_status_bar(f, status_area);
     }
 
     // ---- rendering helpers --------------------------------------------------
 
-    fn render_title(&self, f: &mut Frame, area: Rect) {
+    fn render_title_bar(&self, f: &mut Frame, area: Rect) {
+        let branch = self
+            .repo_info
+            .as_ref()
+            .map(|r| r.branch.as_str())
+            .unwrap_or("?");
+        let path = self
+            .repo_info
+            .as_ref()
+            .map(|r| r.repo_path.as_str())
+            .unwrap_or("");
+
         let line = Line::from(vec![
-            "Commiter".bold().fg(Color::Cyan),
-            Span::raw(" — "),
-            "Generate commit message from git diffs".dim(),
+            Span::raw(" Commiter "),
+            Span::styled(
+                format!("[{}]", branch),
+                Style::default().fg(Color::Cyan).bold(),
+            ),
+            Span::raw("   "),
+            Span::styled(path, Style::default().dim()),
+            Span::raw("  "),
         ]);
-        f.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+
+        let block = Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(Color::DarkGray));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        f.render_widget(Paragraph::new(line), inner);
     }
 
-    fn render_info(&self, f: &mut Frame, area: Rect) {
-        let lines = match self.repo_info {
-            Some(ref info) => vec![
-                Line::from(Span::styled(
-                    format!("Path: {}", info.repo_path),
-                    Style::default().dim(),
-                )),
-                Line::from(vec![
+    fn render_info_line(&self, f: &mut Frame, area: Rect) {
+        let info = match self.repo_info {
+            Some(ref info) => {
+                let mut spans = vec![
                     Span::styled(
-                        format!(
-                            "Staged: {} {}",
-                            info.staged_count,
-                            plural("file", info.staged_count),
-                        ),
+                        format!("Staged: {} {}", info.staged_count, plural("file", info.staged_count)),
                         Style::default().fg(Color::Green),
                     ),
                     Span::raw("  "),
@@ -199,64 +236,191 @@ impl App {
                         ),
                         Style::default().fg(Color::Yellow),
                     ),
-                    if info.truncated {
-                        Span::styled("  [diff truncated]", Style::default().fg(Color::Red))
-                    } else {
-                        Span::raw("")
-                    },
-                ]),
-            ],
-            None => vec![Line::from("")],
+                ];
+                if info.truncated {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        "[diff truncated]",
+                        Style::default().fg(Color::Red).bold(),
+                    ));
+                }
+                Line::from(spans)
+            }
+            None => Line::from(""),
         };
-        f.render_widget(Paragraph::new(lines), area);
+        f.render_widget(Paragraph::new(info), area);
     }
 
-    fn render_generate_button(&self, f: &mut Frame, area: Rect) {
-        let active = self.can_generate();
-        let label = match self.state {
-            AppState::Loading => "  Generating…  ",
-            _ => "  Create commit message  ",
-        };
-        render_button(f, area, label, active);
+    fn render_version_or_spinner(&self, f: &mut Frame, area: Rect) {
+        match self.state {
+            AppState::Loading | AppState::Committing => {
+                let elapsed = self.spinner_start.elapsed();
+                let frame = (elapsed.as_millis() / 100) as usize;
+                let spinner = spinner_chars();
+                let c = spinner[frame % spinner.len()];
+                let label = match self.state {
+                    AppState::Loading => " Generating commit message... ",
+                    AppState::Committing => " Creating commit... ",
+                    _ => unreachable!(),
+                };
+                let line = Line::from(vec![
+                    Span::styled(format!(" {} ", c), Style::default().fg(Color::Cyan).bold()),
+                    Span::styled(label, Style::default().fg(Color::Cyan)),
+                ]);
+                f.render_widget(Paragraph::new(line), area);
+            }
+            _ => {
+                // Show suggested version info if available
+                if let Some(ref ver) = self.suggested_version {
+                    let line = Line::from(vec![
+                        Span::styled("Suggested version: ", Style::default().fg(Color::Magenta)),
+                        Span::styled(ver, Style::default().fg(Color::Magenta).bold()),
+                    ]);
+                    f.render_widget(Paragraph::new(line), area);
+                } else if self.repo_info.is_some() {
+                    // Show version if detected
+                    let version = crate::git::detect_current_version();
+                    if let Some(ref ver) = version {
+                        let line = Line::from(vec![
+                            Span::styled("Version: ", Style::default().dim()),
+                            Span::styled(ver, Style::default().fg(Color::Blue)),
+                        ]);
+                        f.render_widget(Paragraph::new(line), area);
+                    }
+                }
+            }
+        }
     }
 
-    fn render_commit_button(&self, f: &mut Frame, area: Rect) {
-        let label = match self.state {
-            AppState::Committing => "  Committing…  ",
-            _ => "  Commit changes  ",
-        };
-        let active = self.can_commit();
-        render_button(f, area, label, active);
+    fn render_file_list(&self, f: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .title(" Changed Files ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray));
+
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        if inner.height == 0 || inner.width == 0 {
+            return;
+        }
+
+        let files = self
+            .repo_info
+            .as_ref()
+            .map(|r| r.changed_files.as_slice())
+            .unwrap_or(&[]);
+
+        if !self.show_file_list || files.is_empty() {
+            return;
+        }
+
+        let lines: Vec<Line> = files
+            .iter()
+            .map(|f| {
+                Line::from(Span::styled(
+                    format!("  {}", f),
+                    Style::default().fg(Color::White),
+                ))
+            })
+            .collect();
+
+        let p = Paragraph::new(lines);
+        f.render_widget(p, inner);
     }
 
     fn render_message(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Commit Message ")
-            .border_style(Style::default());
-
-        if self.commit_message.is_empty() {
-            f.render_widget(block, area);
+        let border_style = if !self.commit_message.is_empty() {
+            Style::default().fg(Color::Green)
         } else {
-            let inner = block.inner(area);
-            f.render_widget(block, area);
+            Style::default().fg(Color::DarkGray)
+        };
+
+        let block = Block::default()
+            .title(" Commit Message ")
+            .borders(Borders::ALL)
+            .border_style(border_style);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        if !self.commit_message.is_empty() {
             let p = Paragraph::new(self.commit_message.as_str())
                 .wrap(Wrap { trim: false });
             f.render_widget(p, inner);
         }
     }
 
-    fn render_status(&self, f: &mut Frame, area: Rect) {
+    fn render_actions(&self, f: &mut Frame, area: Rect) {
+        let [btn_area, hints_area] =
+            Layout::horizontal([Constraint::Length(28), Constraint::Min(1)]).areas(area);
+
+        // Generate / Generate+Commit buttons in a horizontal row
+        let has_msg = !self.commit_message.is_empty();
+        let is_ready = self.state == AppState::Ready;
+        let is_loading = self.state == AppState::Loading;
+        let is_committing = self.state == AppState::Committing;
+
+        let gen_label = if is_loading {
+            "  Generating…  "
+        } else if has_msg {
+            "  Regenerate  "
+        } else {
+            "  Create commit message  "
+        };
+
+        let gen_active = self.can_generate() || (is_ready && self.can_generate());
+
+        let commit_label = if is_committing {
+            "  Committing…  "
+        } else {
+            "  Commit changes  "
+        };
+        let commit_active = self.can_commit();
+
+        let mut buttons: Vec<Paragraph> = Vec::new();
+
+        // Generate button
+        buttons.push(self.make_button(gen_label, gen_active));
+
+        // Commit button (only if has message)
+        if has_msg {
+            buttons.push(self.make_button(commit_label, commit_active));
+        }
+
+        // Render buttons
+        if buttons.len() == 2 {
+            let [gen, commit] =
+                Layout::horizontal([Constraint::Length(24), Constraint::Length(24)])
+                    .areas(btn_area);
+            f.render_widget(buttons.remove(0), gen);
+            f.render_widget(buttons.remove(0), commit);
+        } else {
+            f.render_widget(buttons.remove(0), btn_area);
+        }
+
+        // Key hints
+        let hints = Line::from(vec![
+            Span::styled("Enter", Style::default().fg(Color::Blue).bold()),
+            Span::raw(" select  "),
+            Span::styled("F1", Style::default().fg(Color::Blue).bold()),
+            Span::raw(" toggle files  "),
+            Span::styled("q", Style::default().fg(Color::Blue).bold()),
+            Span::raw(" quit"),
+        ]);
+        f.render_widget(Paragraph::new(hints).alignment(Alignment::Right), hints_area);
+    }
+
+    fn render_status_bar(&self, f: &mut Frame, area: Rect) {
         let text = &self.status_line;
         if text.is_empty() {
             return;
         }
 
         let style = if text.starts_with('✓') {
-            Style::default().fg(Color::Green)
+            Style::default().fg(Color::Green).bold()
         } else if text.starts_with('✗') {
-            Style::default().fg(Color::Red)
-        } else if text.contains("error") || text.contains("Error") {
+            Style::default().fg(Color::Red).bold()
+        } else if text.to_lowercase().contains("error") {
             Style::default().fg(Color::Red)
         } else if text.contains("truncated") {
             Style::default().fg(Color::Yellow)
@@ -269,35 +433,38 @@ impl App {
             area,
         );
     }
+
+    fn make_button(&self, label: &str, active: bool) -> Paragraph<'static> {
+        let style = if active {
+            Style::default()
+                .bg(Color::Blue)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let border_style = if active {
+            Style::default().fg(Color::Blue)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(border_style);
+        Paragraph::new(Line::from(Span::styled(label.to_string(), style)))
+            .block(block)
+            .alignment(Alignment::Center)
+    }
 }
 
-fn render_button(f: &mut Frame, area: Rect, label: &str, active: bool) {
-    let style = if active {
-        Style::default()
-            .bg(Color::Blue)
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let border_style = if active {
-        Style::default().fg(Color::Blue)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style);
-
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(label, style))).alignment(Alignment::Center),
-        inner,
-    );
+fn spinner_chars() -> &'static [char] {
+    &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 }
 
 fn plural(s: &str, n: usize) -> String {
-    if n == 1 { s.to_string() } else { format!("{}s", s) }
+    if n == 1 {
+        s.to_string()
+    } else {
+        format!("{}s", s)
+    }
 }

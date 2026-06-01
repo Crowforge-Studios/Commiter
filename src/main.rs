@@ -59,6 +59,9 @@ fn run_app(
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q' | 'Q') => break,
+                        KeyCode::F(1) => {
+                            app.show_file_list = !app.show_file_list;
+                        }
                         KeyCode::Enter => {
                             if app.can_generate() {
                                 let diff = app
@@ -71,15 +74,32 @@ fn run_app(
                                     .as_ref()
                                     .map(|r| r.truncated)
                                     .unwrap_or(false);
+                                let current_version = git::detect_current_version();
                                 app.start_generating();
 
                                 let tx = tx.clone();
                                 thread::spawn(move || {
-                                    match ai::generate_commit_message(&diff, truncated) {
-                                        Ok(msg) => {
-                                            match clipboard::copy_to_clipboard(&msg) {
+                                    match ai::generate_commit_message(
+                                        &diff,
+                                        truncated,
+                                        current_version.as_deref(),
+                                    ) {
+                                        Ok(result) => {
+                                            match clipboard::copy_to_clipboard(&result.message) {
                                                 Ok(()) => {
-                                                    tx.send(AppEvent::Generated(msg)).ok();
+                                                    if current_version.is_some() {
+                                                        tx.send(AppEvent::GeneratedWithVersion {
+                                                            message: result.message,
+                                                            suggested_version: result
+                                                                .suggested_version,
+                                                        })
+                                                        .ok();
+                                                    } else {
+                                                        tx.send(AppEvent::Generated(
+                                                            result.message,
+                                                        ))
+                                                        .ok();
+                                                    }
                                                 }
                                                 Err(e) => {
                                                     tx.send(AppEvent::Error(format!(
