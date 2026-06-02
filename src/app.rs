@@ -329,7 +329,9 @@ impl App {
                 if self.latest_version.is_some() {
                     spans.push(Span::styled(" [u] Update ", Style::default().fg(Color::Green).bold()));
                 }
-                spans.push(Span::styled(" [x] Uninstall ", Style::default().fg(Color::Red)));
+                if self.is_installed_version {
+                    spans.push(Span::styled(" [x] Uninstall ", Style::default().fg(Color::Red)));
+                }
                 spans.push(Span::styled(" [q] Close ", Style::default().fg(Color::Blue).bold()));
                 Line::from(spans)
             },
@@ -582,10 +584,8 @@ impl App {
             Span::styled("F1", Style::default().fg(Color::Blue).bold()),
             Span::raw(" toggle files  "),
         ];
-        if self.is_installed_version {
-            hint_spans.push(Span::styled("s", Style::default().fg(Color::Blue).bold()));
-            hint_spans.push(Span::raw(" settings  "));
-        }
+        hint_spans.push(Span::styled("s", Style::default().fg(Color::Blue).bold()));
+        hint_spans.push(Span::raw(" settings  "));
         hint_spans.push(Span::styled("q", Style::default().fg(Color::Blue).bold()));
         hint_spans.push(Span::raw(" quit"));
 

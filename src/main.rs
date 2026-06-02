@@ -161,9 +161,7 @@ fn run_app(
                             app.show_file_list = !app.show_file_list;
                         }
                         KeyCode::Char('s' | 'S') => {
-                            if app.is_installed_version && app.init_error.is_none() {
-                                app.state = AppState::Settings;
-                            }
+                            app.state = AppState::Settings;
                         }
                         KeyCode::Char('r' | 'R') => {
                             if matches!(
