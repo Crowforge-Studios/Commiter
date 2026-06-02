@@ -7,14 +7,17 @@ BINARY="commiter"
 API_URL="https://api.github.com/repos/${GITHUB}/releases/latest"
 DOWNLOAD_URL="https://github.com/${GITHUB}/releases/latest/download/${BINARY}"
 
-# ========== colors ==========
-ESC=$(printf '\033')
-RED="${ESC}[0;31m"
-GREEN="${ESC}[0;32m"
-YELLOW="${ESC}[1;33m"
-CYAN="${ESC}[0;36m"
-BOLD="${ESC}[1m"
-NC="${ESC}[0m"
+# ========== colors (tput) ==========
+if command -v tput >/dev/null 2>&1 && [ -t 1 ]; then
+	RED=$(tput setaf 1)
+	GREEN=$(tput setaf 2)
+	YELLOW=$(tput setaf 3)
+	CYAN=$(tput setaf 6)
+	BOLD=$(tput bold)
+	NC=$(tput sgr0)
+else
+	RED=""; GREEN=""; YELLOW=""; CYAN=""; BOLD=""; NC=""
+fi
 
 info()  { printf "${GREEN}✓${NC} %s\n" "$*"; }
 warn()  { printf "${YELLOW}⚠${NC} %s\n" "$*" >&2; }
