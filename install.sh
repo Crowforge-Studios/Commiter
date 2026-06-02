@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="trk/commiter"
+REPO="Crowforge-Studios/Commiter"
 BINARY="commiter"
 INSTALL_DIR="${HOME}/.local/bin"
 

@@ -282,7 +282,7 @@ fn check_for_update(tx: &mpsc::Sender<AppEvent>) {
             "-sIL",
             "-o", "/dev/null",
             "-w", "%{url_effective}",
-            "https://github.com/trk/commiter/releases/latest",
+            "https://github.com/Crowforge-Studios/Commiter/releases/latest",
         ])
         .output()
         .ok();
@@ -306,7 +306,7 @@ fn check_for_update(tx: &mpsc::Sender<AppEvent>) {
                 let current = env!("CARGO_PKG_VERSION");
                 if latest.as_str() != current {
                     let download_url = format!(
-                        "https://github.com/trk/commiter/releases/latest/download/commiter"
+                        "https://github.com/Crowforge-Studios/Commiter/releases/latest/download/commiter"
                     );
                     tx.send(AppEvent::UpdateCheck {
                         latest,

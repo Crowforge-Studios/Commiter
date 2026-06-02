@@ -6,7 +6,7 @@ to the system clipboard, and optionally stages & commits all changes.
 
 ## Quick start (binary)
 
-1. Download the latest `commiter` binary from [Releases](https://github.com/trk/commiter/releases).
+1. Download the latest `commiter` binary from [Releases](https://github.com/Crowforge-Studios/Commiter/releases).
 2. Make it executable and run it inside any Git repository:
 
 ```bash
