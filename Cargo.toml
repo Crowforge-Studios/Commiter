@@ -8,6 +8,12 @@ description = "A Rust TUI app that generates commit messages from git diffs usin
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"
-git2 = { version = "0.19", features = ["vendored-libgit2"] }
-arboard = "3"
+git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
 anyhow = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"

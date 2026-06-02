@@ -1,6 +1,9 @@
 # Rust build
 target/
 
+# Build output (static binary)
+commiter
+
 # IDE & editors
 .vscode/
 .idea/
