@@ -62,14 +62,6 @@ fn main() -> Result<()> {
         }
     }
 
-    // Start update check in background (only if installed)
-    if installed {
-        let tx = tx.clone();
-        thread::spawn(move || {
-            check_for_update(&tx);
-        });
-    }
-
     let result = run_app(&mut terminal, &mut app, &rx, &tx);
 
     crossterm::execute!(
@@ -135,16 +127,6 @@ fn run_app(
                         match key.code {
                             KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
                                 app.state = app.prev_state();
-                            }
-                            KeyCode::Char('u' | 'U') => {
-                                if app.latest_version.is_some() {
-                                    app.update_status = Some("Downloading update...".to_string());
-                                    let tx = tx.clone();
-                                    let download_url = app.download_url.clone().unwrap_or_default();
-                                    thread::spawn(move || {
-                                        perform_update(&tx, &download_url);
-                                    });
-                                }
                             }
                             KeyCode::Char('x' | 'X') => {
                                 app.state = AppState::ConfirmingUninstall;
@@ -272,104 +254,6 @@ fn spawn_generate(app: &App, tx: &mpsc::Sender<AppEvent>) {
             }
         }
     });
-}
-
-fn check_for_update(tx: &mpsc::Sender<AppEvent>) {
-    let output = std::process::Command::new("curl")
-        .args([
-            "-sIL",
-            "-o", "/dev/null",
-            "-w", "%{url_effective}",
-            "https://github.com/Crowforge-Studios/Commiter/releases/latest",
-        ])
-        .output()
-        .ok();
-
-    let url = output
-        .and_then(|o| {
-            if o.status.success() {
-                String::from_utf8(o.stdout).ok()
-            } else {
-                None
-            }
-        })
-        .and_then(|s| {
-            if s.is_empty() { None } else { Some(s) }
-        });
-
-    match url {
-        Some(url) => {
-            if let Some(tag) = url.rsplit('/').next() {
-                let latest = tag.trim_start_matches('v').to_string();
-                let current = env!("CARGO_PKG_VERSION");
-                if latest.as_str() != current {
-                    let download_url = format!(
-                        "https://github.com/Crowforge-Studios/Commiter/releases/latest/download/commiter"
-                    );
-                    tx.send(AppEvent::UpdateCheck {
-                        latest,
-                        download_url,
-                    })
-                    .ok();
-                } else {
-                    tx.send(AppEvent::UpToDate).ok();
-                }
-            }
-        }
-        None => {
-            tx.send(AppEvent::UpdateProgress(
-                "Could not check for updates (no network?)".to_string(),
-            ))
-            .ok();
-        }
-    }
-}
-
-fn perform_update(tx: &mpsc::Sender<AppEvent>, download_url: &str) {
-    let exe = match std::env::current_exe() {
-        Ok(p) => p,
-        Err(_) => {
-            tx.send(AppEvent::UpdateProgress("Failed to locate binary".to_string()))
-                .ok();
-            return;
-        }
-    };
-
-    let new_path = exe.with_extension("new");
-    let old_path = exe.with_extension("old");
-
-    // Download new binary
-    tx.send(AppEvent::UpdateProgress("Downloading...".to_string())).ok();
-    let status = std::process::Command::new("curl")
-        .args(["-fsSL", "-o"])
-        .arg(&new_path)
-        .arg(download_url)
-        .status()
-        .ok();
-
-    match status {
-        Some(s) if s.success() => {}
-        _ => {
-            tx.send(AppEvent::UpdateProgress("Download failed".to_string())).ok();
-            return;
-        }
-    }
-
-    use std::fs;
-    // Make it executable
-    let _ = fs::set_permissions(&new_path, std::os::unix::fs::PermissionsExt::from_mode(0o755));
-
-    // Swap binaries: old → old, new → current
-    let _ = fs::rename(&exe, &old_path);
-    if fs::rename(&new_path, &exe).is_ok() {
-        tx.send(AppEvent::UpdateDone).ok();
-        // Spawn new version
-        let _ = std::process::Command::new(&exe).spawn();
-    } else {
-        // Restore if rename failed
-        let _ = fs::rename(&old_path, &exe);
-        tx.send(AppEvent::UpdateProgress("Update failed".to_string())).ok();
-    }
 }
 
 fn do_uninstall() {

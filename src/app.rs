@@ -33,13 +33,6 @@ pub enum AppEvent {
     },
     Committed(String),
     Error(String),
-    UpdateCheck {
-        latest: String,
-        download_url: String,
-    },
-    UpToDate,
-    UpdateProgress(String),
-    UpdateDone,
 }
 
 pub struct App {
@@ -55,9 +48,6 @@ pub struct App {
     pub spinner_start: Instant,
     pub show_file_list: bool,
     pub is_installed_version: bool,
-    pub latest_version: Option<String>,
-    pub download_url: Option<String>,
-    pub update_status: Option<String>,
 }
 
 impl App {
@@ -96,9 +86,6 @@ impl App {
                     spinner_start: Instant::now(),
                     show_file_list: true,
                     is_installed_version: is_installed,
-                    latest_version: None,
-                    download_url: None,
-                    update_status: None,
                 }
             }
             Err(e) => Self {
@@ -114,9 +101,6 @@ impl App {
                 spinner_start: Instant::now(),
                 show_file_list: true,
                 is_installed_version: is_installed,
-                latest_version: None,
-                download_url: None,
-                update_status: None,
             },
         }
     }
@@ -196,21 +180,6 @@ impl App {
             AppEvent::Error(err) => {
                 self.status_line = format!("✗ {}", err);
                 self.state = AppState::Idle;
-            }
-            AppEvent::UpdateCheck { latest, download_url } => {
-                self.latest_version = Some(latest);
-                self.download_url = Some(download_url);
-                self.update_status = None;
-            }
-            AppEvent::UpToDate => {
-                self.latest_version = None;
-                self.update_status = Some("✓ You have the latest version".to_string());
-            }
-            AppEvent::UpdateProgress(status) => {
-                self.update_status = Some(status);
-            }
-            AppEvent::UpdateDone => {
-                self.update_status = Some("✓ Update complete! Restarting...".to_string());
             }
         }
     }
@@ -297,28 +266,6 @@ impl App {
                 Span::styled(&self_exe, Style::default().fg(Color::Blue)),
             ]),
             Line::from(""),
-            match (&self.latest_version, &self.update_status) {
-                (Some(latest), _) => Line::from(vec![
-                    Span::styled("Update:  ", Style::default().fg(Color::White)),
-                    Span::styled(
-                        format!("v{} available", latest),
-                        Style::default().fg(Color::Green).bold(),
-                    ),
-                ]),
-                (None, Some(status)) if status.contains("latest") => Line::from(vec![
-                    Span::styled("Update:  ", Style::default().fg(Color::White)),
-                    Span::styled(status.clone(), Style::default().fg(Color::Green)),
-                ]),
-                (None, Some(status)) => Line::from(vec![
-                    Span::styled("Update:  ", Style::default().fg(Color::White)),
-                    Span::styled(status.clone(), Style::default().fg(Color::Yellow)),
-                ]),
-                (None, None) => Line::from(vec![
-                    Span::styled("Update:  ", Style::default().fg(Color::White)),
-                    Span::styled("Checking...", Style::default().fg(Color::Yellow)),
-                ]),
-            },
-            Line::from(""),
             if self.state == AppState::ConfirmingUninstall {
                 Line::from(Span::styled(
                     " Really uninstall? (y/N)",
@@ -326,9 +273,6 @@ impl App {
                 ))
             } else {
                 let mut spans = vec![];
-                if self.latest_version.is_some() {
-                    spans.push(Span::styled(" [u] Update ", Style::default().fg(Color::Green).bold()));
-                }
                 if self.is_installed_version {
                     spans.push(Span::styled(" [x] Uninstall ", Style::default().fg(Color::Red)));
                 }
@@ -435,15 +379,6 @@ impl App {
                     let line = Line::from(vec![
                         Span::styled("Suggested version: ", Style::default().fg(Color::Magenta)),
                         Span::styled(ver, Style::default().fg(Color::Magenta).bold()),
-                    ]);
-                    f.render_widget(Paragraph::new(line), area);
-                } else if let Some(ref latest) = self.latest_version {
-                    let line = Line::from(vec![
-                        Span::styled("Update available: ", Style::default().fg(Color::Green).bold()),
-                        Span::styled(format!("v{}", latest), Style::default().fg(Color::Green)),
-                        Span::raw(" — press "),
-                        Span::styled("s", Style::default().fg(Color::Blue).bold()),
-                        Span::raw(" for Settings"),
                     ]);
                     f.render_widget(Paragraph::new(line), area);
                 } else if self.repo_info.is_some() {
