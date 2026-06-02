@@ -440,20 +440,14 @@ impl App {
         } else {
             " generate  "
         };
-        let show_r = is_pregen || is_ready;
-        let mut hint_spans = vec![
+        let hints = Line::from(vec![
             Span::styled("Enter", Style::default().fg(Color::Blue).bold()),
             Span::raw(hint_enter),
-        ];
-        if show_r {
-            hint_spans.push(Span::styled("r", Style::default().fg(Color::Blue).bold()));
-            hint_spans.push(Span::raw(" regen  "));
-        }
-        hint_spans.push(Span::styled("F1", Style::default().fg(Color::Blue).bold()));
-        hint_spans.push(Span::raw(" toggle files  "));
-        hint_spans.push(Span::styled("q", Style::default().fg(Color::Blue).bold()));
-        hint_spans.push(Span::raw(" quit"));
-        let hints = Line::from(hint_spans);
+            Span::styled("F1", Style::default().fg(Color::Blue).bold()),
+            Span::raw(" toggle files  "),
+            Span::styled("q", Style::default().fg(Color::Blue).bold()),
+            Span::raw(" quit"),
+        ]);
         f.render_widget(Paragraph::new(hints).alignment(Alignment::Right), hints_area);
     }
 
