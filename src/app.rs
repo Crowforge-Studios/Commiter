@@ -12,6 +12,8 @@ use crate::git::RepoInfo;
 #[derive(Clone, Copy, PartialEq)]
 pub enum AppState {
     Idle,
+    PreGenerating,
+    PreGenerated,
     Loading,
     Ready,
     Committing,
@@ -21,6 +23,10 @@ pub enum AppState {
 pub enum AppEvent {
     Generated(String),
     GeneratedWithVersion {
+        message: String,
+        suggested_version: Option<String>,
+    },
+    PreGenerated {
         message: String,
         suggested_version: Option<String>,
     },
@@ -34,6 +40,8 @@ pub struct App {
     pub init_error: Option<String>,
     pub commit_message: String,
     pub suggested_version: Option<String>,
+    pub pregen_message: Option<String>,
+    pub pregen_suggested_version: Option<String>,
     pub status_line: String,
     pub commit_hash: Option<String>,
     pub spinner_start: Instant,
@@ -69,6 +77,8 @@ impl App {
                     init_error: None,
                     commit_message: String::new(),
                     suggested_version: None,
+                    pregen_message: None,
+                    pregen_suggested_version: None,
                     status_line: status,
                     commit_hash: None,
                     spinner_start: Instant::now(),
@@ -81,6 +91,8 @@ impl App {
                 init_error: Some(format!("{} — press 'q' to quit", e)),
                 commit_message: String::new(),
                 suggested_version: None,
+                pregen_message: None,
+                pregen_suggested_version: None,
                 status_line: String::new(),
                 commit_hash: None,
                 spinner_start: Instant::now(),
@@ -99,6 +111,11 @@ impl App {
         self.state == AppState::Ready
             && !self.commit_message.is_empty()
             && self.commit_hash.is_none()
+    }
+
+    pub fn can_copy_pregen(&self) -> bool {
+        self.state == AppState::PreGenerated
+            && self.pregen_message.is_some()
     }
 
     pub fn start_generating(&mut self) {
@@ -128,6 +145,15 @@ impl App {
                 self.suggested_version = suggested_version;
                 self.state = AppState::Ready;
                 self.status_line = "✓ Copied to clipboard".to_string();
+            }
+            AppEvent::PreGenerated {
+                message,
+                suggested_version,
+            } => {
+                self.pregen_message = Some(message);
+                self.pregen_suggested_version = suggested_version;
+                self.state = AppState::PreGenerated;
+                self.status_line = "✓ Ready — Press Enter".to_string();
             }
             AppEvent::Committed(hash) => {
                 let short = if hash.len() > 7 {
@@ -253,12 +279,13 @@ impl App {
 
     fn render_version_or_spinner(&self, f: &mut Frame, area: Rect) {
         match self.state {
-            AppState::Loading | AppState::Committing => {
+            AppState::PreGenerating | AppState::Loading | AppState::Committing => {
                 let elapsed = self.spinner_start.elapsed();
                 let frame = (elapsed.as_millis() / 100) as usize;
                 let spinner = spinner_chars();
                 let c = spinner[frame % spinner.len()];
                 let label = match self.state {
+                    AppState::PreGenerating => " Pre-generating commit message... ",
                     AppState::Loading => " Generating commit message... ",
                     AppState::Committing => " Creating commit... ",
                     _ => unreachable!(),
@@ -330,7 +357,12 @@ impl App {
     }
 
     fn render_message(&self, f: &mut Frame, area: Rect) {
-        let border_style = if !self.commit_message.is_empty() {
+        let display_text = match self.state {
+            AppState::PreGenerated => self.pregen_message.as_deref().unwrap_or(""),
+            _ => self.commit_message.as_str(),
+        };
+
+        let border_style = if !display_text.is_empty() {
             Style::default().fg(Color::Green)
         } else {
             Style::default().fg(Color::DarkGray)
@@ -343,8 +375,8 @@ impl App {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        if !self.commit_message.is_empty() {
-            let p = Paragraph::new(self.commit_message.as_str())
+        if !display_text.is_empty() {
+            let p = Paragraph::new(display_text)
                 .wrap(Wrap { trim: false });
             f.render_widget(p, inner);
         }
@@ -354,37 +386,39 @@ impl App {
         let [btn_area, hints_area] =
             Layout::horizontal([Constraint::Length(28), Constraint::Min(1)]).areas(area);
 
-        // Generate / Generate+Commit buttons in a horizontal row
         let has_msg = !self.commit_message.is_empty();
-        let is_ready = self.state == AppState::Ready;
+        let is_pregen = self.state == AppState::PreGenerated;
+        let is_pregen_loading = self.state == AppState::PreGenerating;
         let is_loading = self.state == AppState::Loading;
         let is_committing = self.state == AppState::Committing;
-
-        let gen_label = if is_loading {
-            "  Generating…  "
-        } else if has_msg {
-            "  Regenerate  "
-        } else {
-            "  Create commit message  "
-        };
-
-        let gen_active = self.can_generate() || (is_ready && self.can_generate());
-
-        let commit_label = if is_committing {
-            "  Committing…  "
-        } else {
-            "  Commit changes  "
-        };
-        let commit_active = self.can_commit();
+        let is_ready = self.state == AppState::Ready;
 
         let mut buttons: Vec<Paragraph> = Vec::new();
 
-        // Generate button
-        buttons.push(self.make_button(gen_label, gen_active));
+        if is_pregen {
+            // Pre-generated message ready — one button
+            buttons.push(self.make_button("  Use message ✓  ", true));
+        } else if is_pregen_loading {
+            buttons.push(self.make_button("  Pre-generating…  ", false));
+        } else {
+            let gen_label = if is_loading {
+                "  Generating…  "
+            } else if has_msg {
+                "  Regenerate  "
+            } else {
+                "  Create commit message  "
+            };
+            let gen_active = self.can_generate() || (is_ready && self.can_generate());
+            buttons.push(self.make_button(gen_label, gen_active));
 
-        // Commit button (only if has message)
-        if has_msg {
-            buttons.push(self.make_button(commit_label, commit_active));
+            if has_msg {
+                let commit_label = if is_committing {
+                    "  Committing…  "
+                } else {
+                    "  Commit changes  "
+                };
+                buttons.push(self.make_button(commit_label, self.can_commit()));
+            }
         }
 
         // Render buttons
@@ -399,14 +433,27 @@ impl App {
         }
 
         // Key hints
-        let hints = Line::from(vec![
+        let hint_enter = if is_pregen {
+            " use message  "
+        } else if is_ready && has_msg {
+            " commit  "
+        } else {
+            " generate  "
+        };
+        let show_r = is_pregen || is_ready;
+        let mut hint_spans = vec![
             Span::styled("Enter", Style::default().fg(Color::Blue).bold()),
-            Span::raw(" select  "),
-            Span::styled("F1", Style::default().fg(Color::Blue).bold()),
-            Span::raw(" toggle files  "),
-            Span::styled("q", Style::default().fg(Color::Blue).bold()),
-            Span::raw(" quit"),
-        ]);
+            Span::raw(hint_enter),
+        ];
+        if show_r {
+            hint_spans.push(Span::styled("r", Style::default().fg(Color::Blue).bold()));
+            hint_spans.push(Span::raw(" regen  "));
+        }
+        hint_spans.push(Span::styled("F1", Style::default().fg(Color::Blue).bold()));
+        hint_spans.push(Span::raw(" toggle files  "));
+        hint_spans.push(Span::styled("q", Style::default().fg(Color::Blue).bold()));
+        hint_spans.push(Span::raw(" quit"));
+        let hints = Line::from(hint_spans);
         f.render_widget(Paragraph::new(hints).alignment(Alignment::Right), hints_area);
     }
 

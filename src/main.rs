@@ -11,7 +11,7 @@ use ratatui::Terminal;
 use std::io::stdout;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn main() -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
@@ -24,6 +24,38 @@ fn main() -> Result<()> {
 
     let (tx, rx) = mpsc::channel::<AppEvent>();
     let mut app = App::new();
+
+    // Start pre-generation immediately if there are changes
+    if let Some(ref info) = app.repo_info {
+        if info.has_changes {
+            let diff = info.combined_diff.clone();
+            let truncated = info.truncated;
+            let current_version = git::detect_current_version();
+            app.state = app::AppState::PreGenerating;
+            app.status_line = "Pre-generating commit message...".to_string();
+            app.spinner_start = Instant::now();
+
+            let tx = tx.clone();
+            thread::spawn(move || {
+                match ai::generate_commit_message(
+                    &diff,
+                    truncated,
+                    current_version.as_deref(),
+                ) {
+                    Ok(result) => {
+                        tx.send(AppEvent::PreGenerated {
+                            message: result.message,
+                            suggested_version: result.suggested_version,
+                        })
+                        .ok();
+                    }
+                    Err(e) => {
+                        tx.send(AppEvent::Error(format!("{}", e))).ok();
+                    }
+                }
+            });
+        }
+    }
 
     let result = run_app(&mut terminal, &mut app, &rx, &tx);
 
@@ -62,59 +94,44 @@ fn run_app(
                         KeyCode::F(1) => {
                             app.show_file_list = !app.show_file_list;
                         }
-                        KeyCode::Enter => {
-                            if app.can_generate() {
-                                let diff = app
-                                    .repo_info
-                                    .as_ref()
-                                    .map(|r| r.combined_diff.clone())
-                                    .unwrap_or_default();
-                                let truncated = app
-                                    .repo_info
-                                    .as_ref()
-                                    .map(|r| r.truncated)
-                                    .unwrap_or(false);
-                                let current_version = git::detect_current_version();
+                        KeyCode::Char('r' | 'R') => {
+                            if matches!(
+                                app.state,
+                                app::AppState::PreGenerated | app::AppState::Ready
+                            ) {
+                                app.pregen_message = None;
+                                app.pregen_suggested_version = None;
+                                app.commit_message.clear();
+                                app.suggested_version = None;
+                                app.commit_hash = None;
                                 app.start_generating();
-
-                                let tx = tx.clone();
-                                thread::spawn(move || {
-                                    match ai::generate_commit_message(
-                                        &diff,
-                                        truncated,
-                                        current_version.as_deref(),
-                                    ) {
-                                        Ok(result) => {
-                                            match clipboard::copy_to_clipboard(&result.message) {
-                                                Ok(()) => {
-                                                    if current_version.is_some() {
-                                                        tx.send(AppEvent::GeneratedWithVersion {
-                                                            message: result.message,
-                                                            suggested_version: result
-                                                                .suggested_version,
-                                                        })
-                                                        .ok();
-                                                    } else {
-                                                        tx.send(AppEvent::Generated(
-                                                            result.message,
-                                                        ))
-                                                        .ok();
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    tx.send(AppEvent::Error(format!(
-                                                        "Clipboard error: {}",
-                                                        e
-                                                    )))
-                                                    .ok();
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tx.send(AppEvent::Error(format!("{}", e))).ok();
-                                        }
+                                spawn_generate(app, tx);
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if app.can_copy_pregen() {
+                                // Pre-generated message ready → copy to clipboard instantly
+                                let msg = app.pregen_message.take().unwrap();
+                                let version = app.pregen_suggested_version.take();
+                                match clipboard::copy_to_clipboard(&msg) {
+                                    Ok(()) => {
+                                        app.commit_message = msg;
+                                        app.suggested_version = version;
+                                        app.state = app::AppState::Ready;
+                                        app.status_line =
+                                            "✓ Copied to clipboard".to_string();
                                     }
-                                });
+                                    Err(e) => {
+                                        tx.send(AppEvent::Error(format!(
+                                            "Clipboard error: {}",
+                                            e
+                                        )))
+                                        .ok();
+                                    }
+                                }
+                            } else if app.can_generate() {
+                                app.start_generating();
+                                spawn_generate(app, tx);
                             } else if app.can_commit() {
                                 let msg = app.commit_message.clone();
                                 let repo_path = app
@@ -148,4 +165,43 @@ fn run_app(
         }
     }
     Ok(())
+}
+
+fn spawn_generate(app: &App, tx: &mpsc::Sender<AppEvent>) {
+    let diff = app
+        .repo_info
+        .as_ref()
+        .map(|r| r.combined_diff.clone())
+        .unwrap_or_default();
+    let truncated = app
+        .repo_info
+        .as_ref()
+        .map(|r| r.truncated)
+        .unwrap_or(false);
+    let current_version = git::detect_current_version();
+
+    let tx = tx.clone();
+    thread::spawn(move || {
+        match ai::generate_commit_message(&diff, truncated, current_version.as_deref()) {
+            Ok(result) => match clipboard::copy_to_clipboard(&result.message) {
+                Ok(()) => {
+                    if current_version.is_some() {
+                        tx.send(AppEvent::GeneratedWithVersion {
+                            message: result.message,
+                            suggested_version: result.suggested_version,
+                        })
+                        .ok();
+                    } else {
+                        tx.send(AppEvent::Generated(result.message)).ok();
+                    }
+                }
+                Err(e) => {
+                    tx.send(AppEvent::Error(format!("Clipboard error: {}", e))).ok();
+                }
+            },
+            Err(e) => {
+                tx.send(AppEvent::Error(format!("{}", e))).ok();
+            }
+        }
+    });
 }
