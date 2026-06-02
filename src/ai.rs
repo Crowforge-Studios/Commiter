@@ -40,7 +40,7 @@ pub fn generate_commit_message(
     truncated: bool,
     current_version: Option<&str>,
 ) -> Result<GenerationResult> {
-    let instruction = "Given these diffs (staged then unstaged), write a single short imperative English commit message (<=72 chars), no explanation, no quotes, nothing else.";
+    let instruction = "Given these diffs (staged then unstaged), write a short imperative English subject line (<=90 chars) followed by a blank line and a detailed description body explaining what changed and why. No quotes.";
 
     let prompt = if let Some(ver) = current_version {
         let version_instruction = format!(
@@ -49,8 +49,9 @@ pub fn generate_commit_message(
              - Breaking changes / major rewrites -> bump major (e.g. v1 -> v2.0.0)\n\
              - New features -> bump minor (e.g. v1.0 -> v1.1.0)\n\
              - Bug fixes / refactors / chores -> bump patch (e.g. v1.0.0 -> v1.0.1)\n\
-             Output format (exactly two lines):\n\
-             <commit message>\n\
+             Output format:\n\
+             <subject line>\n\
+             <description body>\n\
              Next version: <version>\n\n",
             instruction, ver,
         );
@@ -95,25 +96,22 @@ pub fn generate_commit_message(
     }
 
     // Parse the response for version info
-    let (message, suggested_version) = if current_version.is_some() {
+    let (mut message, suggested_version) = if current_version.is_some() {
         parse_versioned_response(&raw)
     } else {
         (raw.clone(), None)
     };
 
-    // Take only the first line if no version was parsed separately
-    let message = if current_version.is_some() {
-        message
-    } else {
-        message.lines().next().unwrap_or(&message).to_string()
-    };
-
-    // Enforce the 72-character maximum.
-    let message = if message.len() > 72 {
-        message[..72].to_string()
-    } else {
-        message
-    };
+    // Enforce 90-char maximum only on the first line (subject).
+    if let Some(first_newline) = message.find('\n') {
+        let subject = &message[..first_newline];
+        let rest = &message[first_newline..];
+        if subject.len() > 90 {
+            message = format!("{}{}", &subject[..90], rest);
+        }
+    } else if message.len() > 90 {
+        message = message[..90].to_string();
+    }
 
     Ok(GenerationResult {
         message,
@@ -121,32 +119,26 @@ pub fn generate_commit_message(
     })
 }
 
-/// Parse the two-line response: "<message>\nNext version: <ver>"
+/// Parse the response: "<subject>\n<body>\nNext version: <ver>"
 fn parse_versioned_response(raw: &str) -> (String, Option<String>) {
     let lines: Vec<&str> = raw.lines().collect();
-    let mut message = String::new();
+    let mut message_lines: Vec<&str> = vec![];
     let mut version = None;
 
     for line in &lines {
         let trimmed = line.trim();
         if let Some(ver) = trimmed.strip_prefix("Next version:") {
             let ver = ver.trim();
-            // Validate basic semver format (vX.Y.Z or X.Y.Z)
             let clean = ver.strip_prefix('v').unwrap_or(ver);
             if clean.split('.').count() == 3 && clean.chars().all(|c| c.is_ascii_digit() || c == '.') {
                 version = Some(format!("v{}", clean));
             }
-            // Don't add this line to the message
-        } else if !trimmed.is_empty() && message.is_empty() {
-            // First non-empty line that isn't a version line = the commit message
-            message = trimmed.to_string();
+        } else {
+            message_lines.push(line);
         }
     }
 
-    if message.is_empty() {
-        message = lines.first().unwrap_or(&"").trim().to_string();
-    }
-
+    let message = message_lines.join("\n").trim().to_string();
     (message, version)
 }
 
@@ -156,25 +148,25 @@ mod tests {
 
     #[test]
     fn test_parse_versioned_response() {
-        let raw = "feat: add user login\nNext version: v1.1.0";
+        let raw = "feat: add user login\n\nImplemented login flow with OAuth2\n\nNext version: v1.1.0";
         let (msg, ver) = parse_versioned_response(raw);
-        assert_eq!(msg, "feat: add user login");
+        assert_eq!(msg, "feat: add user login\n\nImplemented login flow with OAuth2");
         assert_eq!(ver, Some("v1.1.0".to_string()));
     }
 
     #[test]
     fn test_parse_versioned_response_no_version() {
-        let raw = "fix: resolve crash on startup";
+        let raw = "fix: resolve crash on startup\n\nFixed null pointer in User::new()";
         let (msg, ver) = parse_versioned_response(raw);
-        assert_eq!(msg, "fix: resolve crash on startup");
+        assert_eq!(msg, "fix: resolve crash on startup\n\nFixed null pointer in User::new()");
         assert_eq!(ver, None);
     }
 
     #[test]
     fn test_parse_versioned_response_extra_lines() {
-        let raw = "chore: update dependencies\n\nNext version: v1.0.1\n";
+        let raw = "chore: update dependencies\n\nBumped reqwest to 0.12\n\nNext version: v1.0.1\n";
         let (msg, ver) = parse_versioned_response(raw);
-        assert_eq!(msg, "chore: update dependencies");
+        assert_eq!(msg, "chore: update dependencies\n\nBumped reqwest to 0.12");
         assert_eq!(ver, Some("v1.0.1".to_string()));
     }
 
