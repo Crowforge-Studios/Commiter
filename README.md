@@ -13,6 +13,11 @@ curl -fsSL https://raw.githubusercontent.com/Crowforge-Studios/Commiter/master/i
 
 Installs to `~/.local/bin/commiter`. Run `commiter` in any git repo.
 
+### Uninstall
+```bash
+curl -fsSL https://raw.githubusercontent.com/Crowforge-Studios/Commiter/master/install.sh | sh -s -- -u
+```
+
 ### Options
 ```bash
 ./install.sh -v v1.0.0                   # specific version
@@ -43,7 +48,6 @@ commiter
 | Key       | Action                                    |
 |-----------|-------------------------------------------|
 | `Enter`   | Use message / Generate / Commit (context) |
-| `s`       | Settings (uninstall, version info)         |
 | `r`       | Regenerate message                        |
 | `F1`      | Toggle file list                          |
 | `q`       | Quit                                      |
@@ -55,16 +59,6 @@ commiter
 3. Press **Enter** to copy to clipboard.
 4. Press **Enter** again to stage all and commit.
 5. Press **`r`** to regenerate with full diff.
-6. Press **`s`** for Settings to uninstall or view version info.
-
-### Settings
-
-Press `s` to open the settings panel:
-- **Version info** — current installed version and latest available
-- **`u` Update** — downloads and replaces binary, auto-restarts
-- **`x` Uninstall** — removes binary from system
-
-Only shows when installed system-wide (not local `./commiter`).
 
 ## Build from source
 

@@ -185,5 +185,5 @@ esac
 # ========== next steps ==========
 echo ""
 info "Run ${CYAN}${BINARY}${NC} inside any git repository to start."
-info "Press ${CYAN}s${NC} for Settings (uninstall)."
+info "To uninstall: ${CYAN}curl -fsSL https://raw.githubusercontent.com/Crowforge-Studios/Commiter/master/install.sh | sh -s -- -u${NC}"
 echo ""

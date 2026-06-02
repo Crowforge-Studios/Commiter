@@ -17,8 +17,6 @@ pub enum AppState {
     Loading,
     Ready,
     Committing,
-    Settings,
-    ConfirmingUninstall,
 }
 
 pub enum AppEvent {
@@ -47,11 +45,10 @@ pub struct App {
     pub commit_hash: Option<String>,
     pub spinner_start: Instant,
     pub show_file_list: bool,
-    pub is_installed_version: bool,
 }
 
 impl App {
-    pub fn new(is_installed: bool) -> Self {
+    pub fn new() -> Self {
         match crate::git::get_repo_info() {
             Ok(info) => {
                 let status = if !info.has_changes {
@@ -85,7 +82,6 @@ impl App {
                     commit_hash: None,
                     spinner_start: Instant::now(),
                     show_file_list: true,
-                    is_installed_version: is_installed,
                 }
             }
             Err(e) => Self {
@@ -100,7 +96,6 @@ impl App {
                 commit_hash: None,
                 spinner_start: Instant::now(),
                 show_file_list: true,
-                is_installed_version: is_installed,
             },
         }
     }
@@ -132,14 +127,6 @@ impl App {
         self.state = AppState::Committing;
         self.spinner_start = Instant::now();
         self.status_line = "Creating commit...".to_string();
-    }
-
-    pub fn prev_state(&self) -> AppState {
-        if self.commit_hash.is_none() && (!self.commit_message.is_empty() || self.pregen_message.is_some()) {
-            AppState::Ready
-        } else {
-            AppState::Idle
-        }
     }
 
     pub fn handle_event(&mut self, event: AppEvent) {
@@ -185,11 +172,6 @@ impl App {
     }
 
     pub fn draw(&self, f: &mut Frame) {
-        if self.state == AppState::Settings || self.state == AppState::ConfirmingUninstall {
-            self.draw_settings(f);
-            return;
-        }
-
         let size = f.area();
 
         if let Some(ref err) = self.init_error {
@@ -226,70 +208,6 @@ impl App {
         self.render_message(f, msg_area);
         self.render_actions(f, action_area);
         self.render_status_bar(f, status_area);
-    }
-
-    fn draw_settings(&self, f: &mut Frame) {
-        let size = f.area();
-
-        let block = Block::default()
-            .title(" Settings ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
-        let inner = block.inner(size);
-
-        let w = inner.width.min(50);
-        let h = 12u16;
-        let x = inner.x + (inner.width.saturating_sub(w)) / 2;
-        let y = inner.y + (inner.height.saturating_sub(h)) / 2;
-        let area = Rect { x, y, width: w, height: h };
-
-        let outer = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
-        f.render_widget(outer, area);
-
-        let inner_area = Block::default().inner(area);
-
-        let self_exe = std::env::current_exe()
-            .ok()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "?".to_string());
-
-        let version = env!("CARGO_PKG_VERSION");
-        let lines = vec![
-            Line::from(vec![
-                Span::styled("Version: ", Style::default().fg(Color::White)),
-                Span::styled(version, Style::default().fg(Color::Cyan).bold()),
-            ]),
-            Line::from(vec![
-                Span::styled("Binary:  ", Style::default().fg(Color::White)),
-                Span::styled(&self_exe, Style::default().fg(Color::Blue)),
-            ]),
-            Line::from(""),
-            if self.state == AppState::ConfirmingUninstall {
-                Line::from(Span::styled(
-                    " Really uninstall? (y/N)",
-                    Style::default().fg(Color::Red).bold(),
-                ))
-            } else {
-                let mut spans = vec![];
-                if self.is_installed_version {
-                    spans.push(Span::styled(" [x] Uninstall ", Style::default().fg(Color::Red)));
-                }
-                spans.push(Span::styled(" [q] Close ", Style::default().fg(Color::Blue).bold()));
-                Line::from(spans)
-            },
-        ];
-
-        let mut y_offset = inner_area.y + 1 + (inner_area.height.saturating_sub(lines.len() as u16 + 4)) / 2;
-        for line in &lines {
-            let x_offset = inner_area.x + 2;
-            f.render_widget(
-                Paragraph::new(line.clone()),
-                Rect { x: x_offset, y: y_offset, width: inner_area.width.saturating_sub(4), height: 1 },
-            );
-            y_offset += 1;
-        }
     }
 
     fn render_title_bar(&self, f: &mut Frame, area: Rect) {
@@ -513,18 +431,14 @@ impl App {
         } else {
             " generate  "
         };
-        let mut hint_spans = vec![
+        let hints = Line::from(vec![
             Span::styled("Enter", Style::default().fg(Color::Blue).bold()),
             Span::raw(hint_enter),
             Span::styled("F1", Style::default().fg(Color::Blue).bold()),
             Span::raw(" toggle files  "),
-        ];
-        hint_spans.push(Span::styled("s", Style::default().fg(Color::Blue).bold()));
-        hint_spans.push(Span::raw(" settings  "));
-        hint_spans.push(Span::styled("q", Style::default().fg(Color::Blue).bold()));
-        hint_spans.push(Span::raw(" quit"));
-
-        let hints = Line::from(hint_spans);
+            Span::styled("q", Style::default().fg(Color::Blue).bold()),
+            Span::raw(" quit"),
+        ]);
         f.render_widget(Paragraph::new(hints).alignment(Alignment::Right), hints_area);
     }
 

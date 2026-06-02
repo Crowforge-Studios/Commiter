@@ -4,18 +4,14 @@ mod clipboard;
 mod git;
 
 use anyhow::Result;
-use app::{App, AppEvent, AppState};
+use app::{App, AppEvent};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::stdout;
-use std::path::PathBuf;
 use std::sync::mpsc;
-use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
-
-static UNINSTALL_MSG: OnceLock<String> = OnceLock::new();
 
 fn main() -> Result<()> {
     crossterm::terminal::enable_raw_mode()?;
@@ -27,8 +23,7 @@ fn main() -> Result<()> {
     terminal.clear()?;
 
     let (tx, rx) = mpsc::channel::<AppEvent>();
-    let installed = is_installed();
-    let mut app = App::new(installed);
+    let mut app = App::new();
 
     // Start pre-generation immediately if there are changes
     if let Some(ref info) = app.repo_info {
@@ -75,21 +70,7 @@ fn main() -> Result<()> {
         eprintln!("Error: {}", e);
     }
 
-    if let Some(msg) = UNINSTALL_MSG.get() {
-        eprintln!("{}", msg);
-    }
-
     Ok(())
-}
-
-fn is_installed() -> bool {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Ok(home) = std::env::var("HOME") {
-            let installed = PathBuf::from(home).join(".local").join("bin").join("commiter");
-            return exe == installed;
-        }
-    }
-    false
 }
 
 fn run_app(
@@ -108,42 +89,10 @@ fn run_app(
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    // Handle settings/uninstall confirm mode
-                    if app.state == AppState::ConfirmingUninstall {
-                        match key.code {
-                            KeyCode::Char('y' | 'Y') => {
-                                do_uninstall();
-                                break;
-                            }
-                            KeyCode::Char('n' | 'N') | KeyCode::Esc => {
-                                app.state = AppState::Settings;
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    if app.state == AppState::Settings {
-                        match key.code {
-                            KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
-                                app.state = app.prev_state();
-                            }
-                            KeyCode::Char('x' | 'X') => {
-                                app.state = AppState::ConfirmingUninstall;
-                            }
-                            _ => {}
-                        }
-                        continue;
-                    }
-
-                    // Normal mode keys
                     match key.code {
                         KeyCode::Char('q' | 'Q') => break,
                         KeyCode::F(1) => {
                             app.show_file_list = !app.show_file_list;
-                        }
-                        KeyCode::Char('s' | 'S') => {
-                            app.state = AppState::Settings;
                         }
                         KeyCode::Char('r' | 'R') => {
                             if matches!(
@@ -254,15 +203,4 @@ fn spawn_generate(app: &App, tx: &mpsc::Sender<AppEvent>) {
             }
         }
     });
-}
-
-fn do_uninstall() {
-    if let Ok(exe) = std::env::current_exe() {
-        let _ = std::fs::remove_file(&exe);
-    }
-    let _ = UNINSTALL_MSG.set(
-        "commiter has been uninstalled.\n\
-         You may also want to remove ~/.local/bin from your PATH if no longer needed."
-            .to_string(),
-    );
 }
