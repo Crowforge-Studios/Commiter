@@ -94,7 +94,8 @@ if [ -n "$DO_VERSION" ]; then
 else
 	info "Fetching latest release info..."
 	VERSION_TAG="$(curl -sfL "${API_URL}" 2>/dev/null | \
-		sed 's/.*"tag_name": *"\([^"]*\)".*/\1/' )"
+		grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | \
+		cut -d'"' -f4)"
 	if [ -z "$VERSION_TAG" ]; then
 		warn "Could not determine latest version, falling back to 'latest'"
 		VERSION_TAG="latest"
@@ -124,17 +125,16 @@ fi
 # ========== download ==========
 printf "Downloading ${BINARY}..."
 set +e
-HTTP_CODE="$(curl -#fSL -o "$TMP_BIN" -w '%{http_code}' "$ASSET_URL" 2>&1)"
+CURL_OUTPUT="$(curl -#fSL -o "$TMP_BIN" -w '%{http_code}' "$ASSET_URL" 2>&1)"
 CURL_EXIT=$?
 set -e
 
-echo ""
+HTTP_CODE="$(printf '%s' "$CURL_OUTPUT" | tail -c 3)"
 
 if [ "$CURL_EXIT" -ne 0 ] || [ "$HTTP_CODE" != "200" ]; then
 	rm -f "$TMP_BIN"
-	# Restore backup if it existed
 	[ "$HAD_OLD" = 1 ] && mv "${OLD_BIN}.bak" "$OLD_BIN" 2>/dev/null || true
-	die "Download failed (HTTP ${HTTP_CODE:-$CURL_EXIT}). Check your connection or version tag."
+	die "Download failed (HTTP ${HTTP_CODE})"
 fi
 
 # ========== validate ==========
