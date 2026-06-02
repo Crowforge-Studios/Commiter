@@ -8,6 +8,10 @@ all: release
 
 build:
 	cargo build --release
+	strip target/release/$(BINARY)
+	cp target/release/$(BINARY) ./$(BINARY)
+	@echo "Binary created: ./$(BINARY)"
+	@echo "Size: $$(ls -lh $(BINARY) | awk '{print $$5}')"
 
 release:
 	@command -v x86_64-linux-musl-gcc >/dev/null 2>&1 || { \

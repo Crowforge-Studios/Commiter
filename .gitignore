@@ -1,7 +1,7 @@
 # Rust build
 target/
 
-# Build output (static binary)
+# Build output (make build / make release)
 commiter
 
 # IDE & editors

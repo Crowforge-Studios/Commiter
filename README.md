@@ -23,15 +23,26 @@ chmod +x commiter
 
 ## Build from source
 
+### Makefile targets
+
+| Target           | Description                                                         |
+| ---------------- | ------------------------------------------------------------------- |
+| `make build`     | Build & strip release binary (dynamic linking)                      |
+| `make release`   | Build & strip fully static binary (`x86_64-unknown-linux-musl`)     |
+| `make docker-build` | Build fully static binary via Docker (no toolchain setup needed) |
+| `make clean`     | Remove all build artifacts                                          |
+
+All targets output the final binary as `./commiter`.
+
 ### Normal (dynamic)
 
 ```bash
-cargo build --release
+make build
 ```
 
 ### Fully static binary (recommended for distribution)
 
-Requires the `x86_64-unknown-linux-musl` target and musl toolchain:
+Requires the musl toolchain:
 
 ```bash
 # Install musl target
@@ -42,13 +53,9 @@ sudo apt install musl-tools
 
 # Build
 make release
-
-# Or manually:
-cargo build --target x86_64-unknown-linux-musl --release
-strip target/x86_64-unknown-linux-musl/release/commiter
 ```
 
-**Docker build** (no toolchain setup needed):
+**Docker build** (no toolchain setup at all):
 
 ```bash
 make docker-build
@@ -66,18 +73,21 @@ Inside any Git repository:
 
 The UI is keyboard-only:
 
-| Key      | Action                      |
-| -------- | --------------------------- |
-| `Enter`  | Activate the focused button |
-| `F1`     | Toggle file list visibility |
-| `q`      | Quit                        |
+| Key      | Action                                      |
+| -------- | ------------------------------------------- |
+| `Enter`  | Use message / Generate / Commit (context)   |
+| `r`      | Regenerate message (re-runs with full diff) |
+| `F1`     | Toggle file list visibility                 |
+| `q`      | Quit                                        |
 
 ### Workflow
 
 1. Open the app inside a Git repo with staged and/or unstaged changes.
-2. Press **Enter** to run the `Create commit message` button.
-3. The app gathers diffs, calls `opencode run`, and copies the returned message to the clipboard.
-4. A second button, **Commit changes**, appears. Press **Enter** to stage all changes and commit.
+2. The app **immediately starts pre-generating** a commit message in the background (using just the changed file list for speed).
+3. When ready, `✓ Ready — Press Enter` appears.
+4. Press **Enter** to instantly copy the message to the clipboard.
+5. A **Commit changes** button appears. Press **Enter** again to stage all changes and commit.
+6. Not happy with the message? Press **`r`** to regenerate using the full diff.
 
 ### Version detection
 
