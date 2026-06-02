@@ -15,9 +15,9 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-info()  { printf "${GREEN}✓${NC} %s\n" "$*"; }
-warn()  { printf "${YELLOW}⚠${NC} %s\n" "$*" >&2; }
-err()   { printf "${RED}✗${NC} %s\n" "$*" >&2; }
+info()  { printf "${GREEN}✓${NC} %b\n" "$*"; }
+warn()  { printf "${YELLOW}⚠${NC} %b\n" "$*" >&2; }
+err()   { printf "${RED}✗${NC} %b\n" "$*" >&2; }
 die()   { err "$1"; exit 1; }
 
 # ========== flags ==========
