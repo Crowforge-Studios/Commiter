@@ -43,7 +43,7 @@ commiter
 | Key       | Action                                    |
 |-----------|-------------------------------------------|
 | `Enter`   | Use message / Generate / Commit (context) |
-| `s`       | Settings (update, uninstall, version)      |
+| `s`       | Settings (uninstall, version info)         |
 | `r`       | Regenerate message                        |
 | `F1`      | Toggle file list                          |
 | `q`       | Quit                                      |
@@ -55,7 +55,7 @@ commiter
 3. Press **Enter** to copy to clipboard.
 4. Press **Enter** again to stage all and commit.
 5. Press **`r`** to regenerate with full diff.
-6. Press **`s`** for Settings to update or uninstall.
+6. Press **`s`** for Settings to uninstall or view version info.
 
 ### Settings
 

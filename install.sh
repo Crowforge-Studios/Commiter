@@ -185,5 +185,5 @@ esac
 # ========== next steps ==========
 echo ""
 info "Run ${CYAN}${BINARY}${NC} inside any git repository to start."
-info "Press ${CYAN}s${NC} for Settings (update / uninstall)."
+info "Press ${CYAN}s${NC} for Settings (uninstall)."
 echo ""
