@@ -3,9 +3,15 @@ use git2::{DiffOptions, Repository, Signature};
 
 /// Maximum bytes of combined diff text sent to the AI.
 /// If the combined staged+unstaged diff exceeds this, it is truncated.
-pub const DIFF_CUTOFF: usize = 8192;
+/// Override via COMMITER_DIFF_CUTOFF env var.
+fn diff_cutoff() -> usize {
+    std::env::var("COMMITER_DIFF_CUTOFF")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8192)
+}
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RepoInfo {
     pub repo_path: String,
     pub branch: String,
@@ -127,11 +133,12 @@ pub fn get_repo_info() -> Result<RepoInfo> {
         s
     };
 
-    let truncated = combined.len() > DIFF_CUTOFF;
+    let cutoff_bytes = diff_cutoff();
+    let truncated = combined.len() > cutoff_bytes;
     let combined_diff = if truncated {
         let cutoff = combined
             .char_indices()
-            .nth(DIFF_CUTOFF)
+            .nth(cutoff_bytes)
             .map(|(i, _)| i)
             .unwrap_or(combined.len());
         let mut t = combined[..cutoff].to_string();

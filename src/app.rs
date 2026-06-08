@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use crate::git::RepoInfo;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AppState {
     Idle,
     PreGenerating,
@@ -19,6 +19,7 @@ pub enum AppState {
     Committing,
 }
 
+#[derive(Debug)]
 pub enum AppEvent {
     Generated(String),
     GeneratedWithVersion {
@@ -45,6 +46,8 @@ pub struct App {
     pub commit_hash: Option<String>,
     pub spinner_start: Instant,
     pub show_file_list: bool,
+    pub editing: bool,
+    pub cursor_pos: usize,
 }
 
 impl App {
@@ -82,6 +85,8 @@ impl App {
                     commit_hash: None,
                     spinner_start: Instant::now(),
                     show_file_list: true,
+                    editing: false,
+                    cursor_pos: 0,
                 }
             }
             Err(e) => Self {
@@ -96,6 +101,8 @@ impl App {
                 commit_hash: None,
                 spinner_start: Instant::now(),
                 show_file_list: true,
+                editing: false,
+                cursor_pos: 0,
             },
         }
     }
@@ -127,6 +134,75 @@ impl App {
         self.state = AppState::Committing;
         self.spinner_start = Instant::now();
         self.status_line = "Creating commit...".to_string();
+    }
+
+    pub fn start_editing(&mut self) {
+        self.editing = true;
+        self.cursor_pos = self.commit_message.len();
+        self.status_line = "Editing message — Esc to finish".to_string();
+    }
+
+    pub fn stop_editing(&mut self) {
+        self.editing = false;
+        self.status_line = "✓ Message set — Enter to commit".to_string();
+    }
+
+    pub fn insert_char(&mut self, c: char) {
+        self.commit_message.insert(self.cursor_pos, c);
+        self.cursor_pos += c.len_utf8();
+    }
+
+    pub fn delete_backward(&mut self) {
+        if self.cursor_pos > 0 {
+            let prev = self.commit_message[..self.cursor_pos]
+                .char_indices()
+                .next_back()
+                .map(|(i, c)| (i, c.len_utf8()))
+                .unwrap_or((0, 0));
+            self.commit_message.drain(prev.0..self.cursor_pos);
+            self.cursor_pos = prev.0;
+        }
+    }
+
+    pub fn delete_forward(&mut self) {
+        if self.cursor_pos < self.commit_message.len() {
+            let next = self.commit_message[self.cursor_pos..]
+                .char_indices()
+                .next()
+                .map(|(_, c)| c.len_utf8())
+                .unwrap_or(0);
+            self.commit_message.drain(self.cursor_pos..self.cursor_pos + next);
+        }
+    }
+
+    pub fn cursor_left(&mut self) {
+        if self.cursor_pos > 0 {
+            let prev = self.commit_message[..self.cursor_pos]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.cursor_pos = prev;
+        }
+    }
+
+    pub fn cursor_right(&mut self) {
+        if self.cursor_pos < self.commit_message.len() {
+            let next = self.commit_message[self.cursor_pos..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor_pos + i)
+                .unwrap_or(self.commit_message.len());
+            self.cursor_pos = next;
+        }
+    }
+
+    pub fn cursor_home(&mut self) {
+        self.cursor_pos = 0;
+    }
+
+    pub fn cursor_end(&mut self) {
+        self.cursor_pos = self.commit_message.len();
     }
 
     pub fn handle_event(&mut self, event: AppEvent) {
@@ -356,29 +432,76 @@ impl App {
             _ => self.commit_message.as_str(),
         };
 
-        let border_style = if !display_text.is_empty() {
+        let border_style = if self.editing {
+            Style::default().fg(Color::Yellow)
+        } else if !display_text.is_empty() {
             Style::default().fg(Color::Green)
         } else {
             Style::default().fg(Color::DarkGray)
         };
 
+        let title = if self.editing {
+            " Commit Message [EDITING] "
+        } else {
+            " Commit Message "
+        };
+
         let block = Block::default()
-            .title(" Commit Message ")
+            .title(title)
             .borders(Borders::ALL)
             .border_style(border_style);
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        if !display_text.is_empty() {
+        if !display_text.is_empty() || self.editing {
             let p = Paragraph::new(display_text)
                 .wrap(Wrap { trim: false });
             f.render_widget(p, inner);
+
+            if self.editing && inner.width > 0 {
+                let text_before = &self.commit_message[..self.cursor_pos.min(self.commit_message.len())];
+                let mut visual_y = 0u16;
+                for line in text_before.split('\n') {
+                    if line.is_empty() {
+                        visual_y += 1;
+                    } else {
+                        visual_y += (line.len() as u16 + inner.width - 1) / inner.width;
+                    }
+                }
+                visual_y = visual_y.saturating_sub(1);
+                let last_line = text_before.split('\n').last().unwrap_or("");
+                let visual_x = if inner.width > 0 {
+                    (last_line.len() as u16) % inner.width
+                } else {
+                    0
+                };
+                f.set_cursor_position((
+                    inner.x + visual_x.min(inner.width.saturating_sub(1)),
+                    inner.y + visual_y.min(inner.height.saturating_sub(1)),
+                ));
+            }
         }
     }
 
     fn render_actions(&self, f: &mut Frame, area: Rect) {
         let [btn_area, hints_area] =
             Layout::horizontal([Constraint::Length(28), Constraint::Min(1)]).areas(area);
+
+        if self.editing {
+            let btn = self.make_button("  Finish editing [Esc]  ", true);
+            f.render_widget(btn, btn_area);
+
+            let hints = Line::from(vec![
+                Span::styled("Esc", Style::default().fg(Color::Blue).bold()),
+                Span::raw(" finish  "),
+                Span::styled("F1", Style::default().fg(Color::Blue).bold()),
+                Span::raw(" files  "),
+                Span::styled("q", Style::default().fg(Color::Blue).bold()),
+                Span::raw(" quit"),
+            ]);
+            f.render_widget(Paragraph::new(hints).alignment(Alignment::Right), hints_area);
+            return;
+        }
 
         let has_msg = !self.commit_message.is_empty();
         let is_pregen = self.state == AppState::PreGenerated;
@@ -393,24 +516,21 @@ impl App {
             buttons.push(self.make_button("  Use message ✓  ", true));
         } else if is_pregen_loading {
             buttons.push(self.make_button("  Pre-generating…  ", false));
+        } else if is_loading || is_committing {
+            let label = if is_loading { "  Generating…  " } else { "  Committing…  " };
+            buttons.push(self.make_button(label, false));
         } else {
-            let gen_label = if is_loading {
-                "  Generating…  "
-            } else if has_msg {
-                "  Regenerate  "
-            } else {
-                "  Create commit message  "
-            };
-            let gen_active = self.can_generate() || (is_ready && self.can_generate());
-            buttons.push(self.make_button(gen_label, gen_active));
+            let can_gen = self.can_generate();
+            let gen_active = can_gen || (is_ready && has_msg);
+            buttons.push(self.make_button(
+                if can_gen { "  Create commit message  " }
+                else if has_msg { "  Regenerate  " }
+                else { "  Create commit message  " },
+                gen_active,
+            ));
 
             if has_msg {
-                let commit_label = if is_committing {
-                    "  Committing…  "
-                } else {
-                    "  Commit changes  "
-                };
-                buttons.push(self.make_button(commit_label, self.can_commit()));
+                buttons.push(self.make_button("  Commit changes  ", self.can_commit()));
             }
         }
 
@@ -420,26 +540,39 @@ impl App {
                     .areas(btn_area);
             f.render_widget(buttons.remove(0), gen);
             f.render_widget(buttons.remove(0), commit);
-        } else {
+        } else if buttons.len() == 1 {
             f.render_widget(buttons.remove(0), btn_area);
         }
 
-        let hint_enter = if is_pregen {
-            " use message  "
+        let is_busy = is_loading || is_committing || is_pregen_loading;
+        let mut hints = vec![];
+
+        if is_pregen {
+            hints.push(Span::styled("Enter", Style::default().fg(Color::Blue).bold()));
+            hints.push(Span::raw(" use message  "));
         } else if is_ready && has_msg {
-            " commit  "
-        } else {
-            " generate  "
-        };
-        let hints = Line::from(vec![
-            Span::styled("Enter", Style::default().fg(Color::Blue).bold()),
-            Span::raw(hint_enter),
-            Span::styled("F1", Style::default().fg(Color::Blue).bold()),
-            Span::raw(" toggle files  "),
-            Span::styled("q", Style::default().fg(Color::Blue).bold()),
-            Span::raw(" quit"),
-        ]);
-        f.render_widget(Paragraph::new(hints).alignment(Alignment::Right), hints_area);
+            hints.push(Span::styled("Enter", Style::default().fg(Color::Blue).bold()));
+            hints.push(Span::raw(" commit  "));
+        } else if !is_busy {
+            hints.push(Span::styled("Enter", Style::default().fg(Color::Blue).bold()));
+            hints.push(Span::raw(" generate  "));
+        }
+
+        if has_msg && is_ready {
+            hints.push(Span::styled("e", Style::default().fg(Color::Blue).bold()));
+            hints.push(Span::raw(" edit  "));
+        }
+        if has_msg {
+            hints.push(Span::styled("r", Style::default().fg(Color::Blue).bold()));
+            hints.push(Span::raw(" regen  "));
+        }
+        hints.push(Span::styled("F1", Style::default().fg(Color::Blue).bold()));
+        hints.push(Span::raw(" files  "));
+        hints.push(Span::styled("q", Style::default().fg(Color::Blue).bold()));
+        hints.push(Span::raw(" quit"));
+
+        let hints_line = Line::from(hints);
+        f.render_widget(Paragraph::new(hints_line).alignment(Alignment::Right), hints_area);
     }
 
     fn render_status_bar(&self, f: &mut Frame, area: Rect) {
@@ -498,5 +631,262 @@ fn plural(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         format!("{}s", s)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn make_app() -> App {
+        App {
+            state: AppState::Idle,
+            repo_info: None,
+            init_error: None,
+            commit_message: String::new(),
+            suggested_version: None,
+            pregen_message: None,
+            pregen_suggested_version: None,
+            status_line: String::new(),
+            commit_hash: None,
+            spinner_start: Instant::now(),
+            show_file_list: true,
+            editing: false,
+            cursor_pos: 0,
+        }
+    }
+
+    #[test]
+    fn test_can_generate_idle_no_changes() {
+        let app = make_app();
+        assert!(!app.can_generate());
+    }
+
+    #[test]
+    fn test_can_generate_idle_with_changes() {
+        let mut app = make_app();
+        app.repo_info = Some(crate::git::RepoInfo {
+            repo_path: ".".into(),
+            branch: "main".into(),
+            staged_count: 1,
+            unstaged_count: 0,
+            changed_files: vec!["foo.rs".into()],
+            combined_diff: "diff --git a/foo.rs b/foo.rs".into(),
+            truncated: false,
+            has_changes: true,
+        });
+        assert!(app.can_generate());
+    }
+
+    #[test]
+    fn test_can_generate_wrong_state() {
+        let mut app = make_app();
+        app.state = AppState::Ready;
+        assert!(!app.can_generate());
+    }
+
+    #[test]
+    fn test_can_commit_ready_with_message() {
+        let mut app = make_app();
+        app.state = AppState::Ready;
+        app.commit_message = "feat: add feature".into();
+        assert!(app.can_commit());
+    }
+
+    #[test]
+    fn test_can_commit_already_committed() {
+        let mut app = make_app();
+        app.state = AppState::Ready;
+        app.commit_message = "feat: add feature".into();
+        app.commit_hash = Some("abc1234".into());
+        assert!(!app.can_commit());
+    }
+
+    #[test]
+    fn test_can_commit_empty_message() {
+        let mut app = make_app();
+        app.state = AppState::Ready;
+        assert!(!app.can_commit());
+    }
+
+    #[test]
+    fn test_can_copy_pregen() {
+        let mut app = make_app();
+        app.state = AppState::PreGenerated;
+        app.pregen_message = Some("feat: add".into());
+        assert!(app.can_copy_pregen());
+    }
+
+    #[test]
+    fn test_can_copy_pregen_no_message() {
+        let mut app = make_app();
+        app.state = AppState::PreGenerated;
+        assert!(!app.can_copy_pregen());
+    }
+
+    #[test]
+    fn test_handle_event_generated() {
+        let mut app = make_app();
+        app.handle_event(AppEvent::Generated("feat: x".into()));
+        assert_eq!(app.commit_message, "feat: x");
+        assert_eq!(app.state, AppState::Ready);
+    }
+
+    #[test]
+    fn test_handle_event_committed() {
+        let mut app = make_app();
+        app.handle_event(AppEvent::Committed("deadbeef1234567".into()));
+        assert_eq!(app.commit_hash, Some("deadbeef1234567".into()));
+        assert_eq!(app.state, AppState::Ready);
+    }
+
+    #[test]
+    fn test_handle_event_error() {
+        let mut app = make_app();
+        app.handle_event(AppEvent::Error("something went wrong".into()));
+        assert_eq!(app.state, AppState::Idle);
+        assert!(app.status_line.contains("something went wrong"));
+    }
+
+    #[test]
+    fn test_insert_char() {
+        let mut app = make_app();
+        app.commit_message = "helo".into();
+        app.cursor_pos = 3;
+        app.insert_char('l');
+        assert_eq!(app.commit_message, "hello");
+        assert_eq!(app.cursor_pos, 4);
+    }
+
+    #[test]
+    fn test_insert_char_at_end() {
+        let mut app = make_app();
+        app.commit_message = "hello".into();
+        app.cursor_pos = 5;
+        app.insert_char('!');
+        assert_eq!(app.commit_message, "hello!");
+        assert_eq!(app.cursor_pos, 6);
+    }
+
+    #[test]
+    fn test_delete_backward() {
+        let mut app = make_app();
+        app.commit_message = "hello".into();
+        app.cursor_pos = 5;
+        app.delete_backward();
+        assert_eq!(app.commit_message, "hell");
+        assert_eq!(app.cursor_pos, 4);
+    }
+
+    #[test]
+    fn test_delete_backward_at_start() {
+        let mut app = make_app();
+        app.commit_message = "hello".into();
+        app.cursor_pos = 0;
+        app.delete_backward();
+        assert_eq!(app.commit_message, "hello");
+        assert_eq!(app.cursor_pos, 0);
+    }
+
+    #[test]
+    fn test_delete_forward() {
+        let mut app = make_app();
+        app.commit_message = "hello".into();
+        app.cursor_pos = 0;
+        app.delete_forward();
+        assert_eq!(app.commit_message, "ello");
+        assert_eq!(app.cursor_pos, 0);
+    }
+
+    #[test]
+    fn test_delete_forward_at_end() {
+        let mut app = make_app();
+        app.commit_message = "hello".into();
+        app.cursor_pos = 5;
+        app.delete_forward();
+        assert_eq!(app.commit_message, "hello");
+        assert_eq!(app.cursor_pos, 5);
+    }
+
+    #[test]
+    fn test_cursor_left_right() {
+        let mut app = make_app();
+        app.commit_message = "hello".into();
+        app.cursor_pos = 5;
+        app.cursor_left();
+        assert_eq!(app.cursor_pos, 4);
+        app.cursor_left();
+        assert_eq!(app.cursor_pos, 3);
+        app.cursor_right();
+        assert_eq!(app.cursor_pos, 4);
+    }
+
+    #[test]
+    fn test_cursor_home_end() {
+        let mut app = make_app();
+        app.commit_message = "hello world".into();
+        app.cursor_pos = 5;
+        app.cursor_home();
+        assert_eq!(app.cursor_pos, 0);
+        app.cursor_end();
+        assert_eq!(app.cursor_pos, 11);
+    }
+
+    #[test]
+    fn test_insert_char_utf8() {
+        let mut app = make_app();
+        app.commit_message = "héllo".into();
+        app.cursor_pos = 3; // after 'é' (2-byte char at bytes 1-2)
+        app.insert_char('!');
+        assert_eq!(app.commit_message, "hé!llo");
+        assert_eq!(app.cursor_pos, 4);
+    }
+
+    #[test]
+    fn test_delete_backward_utf8() {
+        let mut app = make_app();
+        app.commit_message = "héllo".into();
+        app.cursor_pos = 6; // end of string
+        app.delete_backward();
+        // 'o' removed
+        app.delete_backward();
+        // 'l' removed
+        app.delete_backward();
+        // 'l' removed
+        app.delete_backward();
+        // 'é' removed (2 bytes)
+        assert_eq!(app.commit_message, "h");
+        assert_eq!(app.cursor_pos, 1);
+    }
+
+    #[test]
+    fn test_cursor_bounds() {
+        let mut app = make_app();
+        app.commit_message = "hi".into();
+        app.cursor_pos = 0;
+        app.cursor_left();
+        assert_eq!(app.cursor_pos, 0);
+        app.cursor_pos = 2;
+        app.cursor_right();
+        assert_eq!(app.cursor_pos, 2);
+    }
+
+    #[test]
+    fn test_start_editing() {
+        let mut app = make_app();
+        app.commit_message = "feat: add".into();
+        app.start_editing();
+        assert!(app.editing);
+        assert_eq!(app.cursor_pos, 9);
+    }
+
+    #[test]
+    fn test_stop_editing() {
+        let mut app = make_app();
+        app.commit_message = "feat: add".into();
+        app.editing = true;
+        app.stop_editing();
+        assert!(!app.editing);
     }
 }

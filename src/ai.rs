@@ -1,28 +1,10 @@
 use anyhow::{Context, Result};
 use std::process::Command;
-
-
-
-
-
-
-
-///----------------------------------------------------------------------------------------------
-///----------------------------------------------------------------------------------------------
-///----------------------------------------------------------------------------------------------
-/// Model to use for opencode CLI. Change this constant to use a different model.
-const MODEL: &str = "opencode/deepseek-v4-flash-free";
-///----------------------------------------------------------------------------------------------
-///----------------------------------------------------------------------------------------------
-///----------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
+/// Model to use for opencode CLI. Override via OPENCODE_MODEL env var.
+pub fn get_model() -> String {
+    std::env::var("OPENCODE_MODEL")
+        .unwrap_or_else(|_| "opencode/deepseek-v4-flash-free".to_string())
+}
 /// Result of AI commit message generation.
 pub struct GenerationResult {
     pub message: String,
@@ -78,7 +60,7 @@ pub fn generate_commit_message(
     let output = Command::new("opencode")
         .arg("run")
         .arg("--model")
-        .arg(MODEL)
+        .arg(get_model())
         .arg(&prompt)
         .output()
         .context("opencode CLI not found. Is it installed and in PATH?")?;
@@ -102,15 +84,17 @@ pub fn generate_commit_message(
         (raw.clone(), None)
     };
 
-    // Enforce 90-char maximum only on the first line (subject).
+    // Enforce 90-char maximum on the first line (subject), breaking at word boundary.
     if let Some(first_newline) = message.find('\n') {
         let subject = &message[..first_newline];
         let rest = &message[first_newline..];
         if subject.len() > 90 {
-            message = format!("{}{}", &subject[..90], rest);
+            let cutoff = subject[..90].rfind(' ').unwrap_or(90);
+            message = format!("{}{}", &subject[..cutoff], rest);
         }
     } else if message.len() > 90 {
-        message = message[..90].to_string();
+        let cutoff = message[..90].rfind(' ').unwrap_or(90);
+        message = message[..cutoff].to_string();
     }
 
     Ok(GenerationResult {
