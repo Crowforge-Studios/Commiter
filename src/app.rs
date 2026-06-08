@@ -521,16 +521,19 @@ impl App {
             buttons.push(self.make_button(label, false));
         } else {
             let can_gen = self.can_generate();
-            let gen_active = can_gen || (is_ready && has_msg);
-            buttons.push(self.make_button(
-                if can_gen { "  Create commit message  " }
-                else if has_msg { "  Regenerate  " }
-                else { "  Create commit message  " },
-                gen_active,
-            ));
-
+            if can_gen {
+                buttons.push(self.make_button("  Create commit message  ", true));
+            }
             if has_msg {
-                buttons.push(self.make_button("  Commit changes  ", self.can_commit()));
+                let can_commit = self.can_commit();
+                buttons.push(self.make_button(
+                    if can_commit { "  Commit changes  " }
+                    else if self.commit_hash.is_some() { "  Committed ✓  " }
+                    else { "  Commit changes  " },
+                    can_commit,
+                ));
+            } else if !can_gen {
+                buttons.push(self.make_button("  Create commit message  ", false));
             }
         }
 
