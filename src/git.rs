@@ -1,5 +1,17 @@
 use anyhow::{Context, Result};
-use git2::{DiffOptions, Repository, Signature};
+use git2::{DiffOptions, Delta, Repository, Signature};
+
+fn delta_str(d: Delta) -> &'static str {
+    match d {
+        Delta::Added => "A",
+        Delta::Deleted => "D",
+        Delta::Modified => "M",
+        Delta::Renamed => "R",
+        Delta::Copied => "C",
+        Delta::Typechange => "T",
+        _ => "?",
+    }
+}
 
 /// Maximum bytes of combined diff text sent to the AI.
 /// If the combined staged+unstaged diff exceeds this, it is truncated.
@@ -18,6 +30,7 @@ pub struct RepoInfo {
     pub staged_count: usize,
     pub unstaged_count: usize,
     pub changed_files: Vec<String>,
+    pub changed_statuses: Vec<String>,
     pub combined_diff: String,
     pub truncated: bool,
     pub has_changes: bool,
@@ -46,14 +59,15 @@ pub fn get_repo_info() -> Result<RepoInfo> {
     let mut opts = DiffOptions::new();
     opts.context_lines(3);
 
-    let (staged_count, staged_text, staged_files) = {
+    let (staged_count, staged_text, staged_files, staged_statuses) = {
         let diff = repo
             .diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))
             .context("Failed to get staged diff")?;
 
-        let count = diff.deltas().count();
-        let files: Vec<String> = diff
-            .deltas()
+        let deltas: Vec<_> = diff.deltas().collect();
+        let count = deltas.len();
+        let files: Vec<String> = deltas
+            .iter()
             .map(|d| {
                 d.new_file()
                     .path()
@@ -61,6 +75,7 @@ pub fn get_repo_info() -> Result<RepoInfo> {
                     .unwrap_or_default()
             })
             .collect();
+        let statuses: Vec<String> = deltas.iter().map(|d| delta_str(d.status()).to_string()).collect();
         let mut text = String::new();
         diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
             if let Ok(content) = std::str::from_utf8(line.content()) {
@@ -70,18 +85,19 @@ pub fn get_repo_info() -> Result<RepoInfo> {
         })
         .context("Failed to print staged diff")?;
 
-        (count, text, files)
+        (count, text, files, statuses)
     };
 
-    let (unstaged_count, unstaged_text, unstaged_files) = {
+    let (unstaged_count, unstaged_text, unstaged_files, unstaged_statuses) = {
         let index = repo.index().context("Failed to open index")?;
         let diff = repo
             .diff_index_to_workdir(Some(&index), Some(&mut opts))
             .context("Failed to get unstaged diff")?;
 
-        let count = diff.deltas().count();
-        let files: Vec<String> = diff
-            .deltas()
+        let deltas: Vec<_> = diff.deltas().collect();
+        let count = deltas.len();
+        let files: Vec<String> = deltas
+            .iter()
             .map(|d| {
                 d.new_file()
                     .path()
@@ -89,6 +105,7 @@ pub fn get_repo_info() -> Result<RepoInfo> {
                     .unwrap_or_default()
             })
             .collect();
+        let statuses: Vec<String> = deltas.iter().map(|d| delta_str(d.status()).to_string()).collect();
         let mut text = String::new();
         diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
             if let Ok(content) = std::str::from_utf8(line.content()) {
@@ -98,14 +115,18 @@ pub fn get_repo_info() -> Result<RepoInfo> {
         })
         .context("Failed to print unstaged diff")?;
 
-        (count, text, files)
+        (count, text, files, statuses)
     };
 
-    // Combine file lists (deduped, staged first)
+    // Combine file lists and statuses (deduped, staged first)
     let mut changed_files: Vec<String> = staged_files.clone();
-    for f in &unstaged_files {
-        if !changed_files.contains(f) {
+    let mut changed_statuses: Vec<String> = staged_statuses.clone();
+    for (i, f) in unstaged_files.iter().enumerate() {
+        if let Some(_pos) = changed_files.iter().position(|x| x == f) {
+            // Prefer staged status if file is in both
+        } else {
             changed_files.push(f.clone());
+            changed_statuses.push(unstaged_statuses[i].clone());
         }
     }
 
@@ -154,6 +175,7 @@ pub fn get_repo_info() -> Result<RepoInfo> {
         staged_count,
         unstaged_count,
         changed_files,
+        changed_statuses,
         combined_diff,
         truncated,
         has_changes,

@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
 use std::time::Instant;
@@ -254,6 +254,7 @@ impl App {
             let block = Block::default()
                 .title(" Commiter — Error ")
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Red));
             let p = Paragraph::new(Line::from(Span::styled(
                 err,
@@ -299,18 +300,20 @@ impl App {
             .unwrap_or("");
 
         let line = Line::from(vec![
-            Span::raw(" Commiter "),
+            Span::styled(" Commiter ", Style::default().fg(Color::Cyan).bold()),
+            Span::raw(" "),
             Span::styled(
-                format!("[{}]", branch),
+                format!(" {}", branch),
                 Style::default().fg(Color::Cyan).bold(),
             ),
-            Span::raw("   "),
-            Span::styled(path, Style::default().dim()),
+            Span::raw("  "),
+            Span::styled(path, Style::default().fg(Color::DarkGray)),
             Span::raw("  "),
         ]);
 
         let block = Block::default()
             .borders(Borders::BOTTOM)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::DarkGray));
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -322,23 +325,21 @@ impl App {
             Some(ref info) => {
                 let mut spans = vec![
                     Span::styled(
-                        format!("Staged: {} {}", info.staged_count, plural("file", info.staged_count)),
-                        Style::default().fg(Color::Green),
+                        format!(" +{} ", info.staged_count),
+                        Style::default().fg(Color::Green).bold(),
                     ),
+                    Span::styled(" staged ", Style::default().fg(Color::Green)),
                     Span::raw("  "),
                     Span::styled(
-                        format!(
-                            "Unstaged: {} {}",
-                            info.unstaged_count,
-                            plural("file", info.unstaged_count),
-                        ),
-                        Style::default().fg(Color::Yellow),
+                        format!(" ~{} ", info.unstaged_count),
+                        Style::default().fg(Color::Yellow).bold(),
                     ),
+                    Span::styled(" unstaged ", Style::default().fg(Color::Yellow)),
                 ];
                 if info.truncated {
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(
-                        "[diff truncated]",
+                        " [truncated] ",
                         Style::default().fg(Color::Red).bold(),
                     ));
                 }
@@ -364,7 +365,7 @@ impl App {
                 };
                 let line = Line::from(vec![
                     Span::styled(format!(" {} ", c), Style::default().fg(Color::Cyan).bold()),
-                    Span::styled(label, Style::default().fg(Color::Cyan)),
+                    Span::styled(label, Style::default().fg(Color::Cyan).bold()),
                 ]);
                 f.render_widget(Paragraph::new(line), area);
             }
@@ -393,6 +394,7 @@ impl App {
         let block = Block::default()
             .title(" Changed Files ")
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::DarkGray));
 
         let inner = block.inner(area);
@@ -402,11 +404,11 @@ impl App {
             return;
         }
 
-        let files = self
+        let (files, statuses) = self
             .repo_info
             .as_ref()
-            .map(|r| r.changed_files.as_slice())
-            .unwrap_or(&[]);
+            .map(|r| (r.changed_files.as_slice(), r.changed_statuses.as_slice()))
+            .unwrap_or((&[], &[]));
 
         if !self.show_file_list || files.is_empty() {
             return;
@@ -414,11 +416,19 @@ impl App {
 
         let lines: Vec<Line> = files
             .iter()
-            .map(|f| {
-                Line::from(Span::styled(
-                    format!("  {}", f),
-                    Style::default().fg(Color::White),
-                ))
+            .zip(statuses.iter())
+            .map(|(f, s)| {
+                let (icon, color) = match s.as_str() {
+                    "A" => ("+", Color::Green),
+                    "M" => ("~", Color::Yellow),
+                    "D" => ("-", Color::Red),
+                    "R" => (">", Color::Cyan),
+                    _ => (" ", Color::White),
+                };
+                Line::from(vec![
+                    Span::styled(format!(" {} ", icon), Style::default().fg(color).bold()),
+                    Span::styled(f.clone(), Style::default().fg(Color::White)),
+                ])
             })
             .collect();
 
@@ -449,6 +459,7 @@ impl App {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(border_style);
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -581,17 +592,16 @@ impl App {
             return;
         }
 
-        let style = if text.starts_with('✓') {
-            Style::default().fg(Color::Green).bold()
-        } else if text.starts_with('✗') {
-            Style::default().fg(Color::Red).bold()
-        } else if text.to_lowercase().contains("error") {
-            Style::default().fg(Color::Red)
+        let (fg, bg) = if text.starts_with('✓') {
+            (Color::Green, Color::Reset)
+        } else if text.starts_with('✗') || text.to_lowercase().contains("error") {
+            (Color::Red, Color::Reset)
         } else if text.contains("truncated") {
-            Style::default().fg(Color::Yellow)
+            (Color::Yellow, Color::Reset)
         } else {
-            Style::default().fg(Color::White)
+            (Color::White, Color::Reset)
         };
+        let style = Style::default().fg(fg).bg(bg).bold();
 
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(text, style))),
@@ -615,6 +625,7 @@ impl App {
         };
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(border_style);
         Paragraph::new(Line::from(Span::styled(label.to_string(), style)))
             .block(block)
@@ -624,14 +635,6 @@ impl App {
 
 fn spinner_chars() -> &'static [char] {
     &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-}
-
-fn plural(s: &str, n: usize) -> String {
-    if n == 1 {
-        s.to_string()
-    } else {
-        format!("{}s", s)
-    }
 }
 
 #[cfg(test)]
@@ -672,6 +675,7 @@ mod tests {
             staged_count: 1,
             unstaged_count: 0,
             changed_files: vec!["foo.rs".into()],
+            changed_statuses: vec!["M".into()],
             combined_diff: "diff --git a/foo.rs b/foo.rs".into(),
             truncated: false,
             has_changes: true,
