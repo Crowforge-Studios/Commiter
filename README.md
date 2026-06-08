@@ -43,14 +43,14 @@ Inside any Git repository:
 commiter
 ```
 
-### Keys
+### CLI Options
 
-| Key       | Action                                    |
-|-----------|-------------------------------------------|
-| `Enter`   | Use message / Generate / Commit (context) |
-| `r`       | Regenerate message                        |
-| `F1`      | Toggle file list                          |
-| `q`       | Quit                                      |
+| Flag                  | Description                                   |
+|-----------------------|-----------------------------------------------|
+| `--model <model>`     | AI model (default: `opencode/deepseek-v4-flash-free`), or `OPENCODE_MODEL` env var |
+| `--diff-cutoff <bytes>` | Max diff bytes sent to AI (default: 8192), or `COMMITER_DIFF_CUTOFF` env var |
+| `--version, -V`       | Print version and exit                        |
+| `--help, -h`          | Print this help                               |
 
 ### Workflow
 
@@ -58,7 +58,21 @@ commiter
 2. The app **pre-generates** a commit message in the background.
 3. Press **Enter** to copy to clipboard.
 4. Press **Enter** again to stage all and commit.
-5. Press **`r`** to regenerate with full diff.
+5. Press **`e`** to edit the message before committing.
+6. Press **`r`** to regenerate with full diff.
+
+### Keys
+
+| Key       | Context                 | Action                     |
+|-----------|-------------------------|----------------------------|
+| `Enter`   | PreGenerated            | Copy message to clipboard  |
+| `Enter`   | Idle + changes          | Generate commit message    |
+| `Enter`   | Ready                   | Commit                     |
+| `e`       | Ready + message         | Enter edit mode            |
+| `Esc`     | Editing                 | Exit edit mode             |
+| `r`       | PreGenerated / Ready    | Regenerate message         |
+| `F1`      | Any                     | Toggle file list           |
+| `q`       | Any                     | Quit                       |
 
 ## Build from source
 
@@ -92,7 +106,13 @@ The resulting binary at `./commiter` has no external dependencies.
 
 ## AI Model
 
-Uses `opencode/deepseek-v4-flash-free` by default (configurable in `src/ai.rs`).
+Uses `opencode/deepseek-v4-flash-free` by default. Override with `--model` flag
+or `OPENCODE_MODEL` environment variable.
+
+## Contributing
+
+Contributions are welcome! Feel free to open issues or submit pull requests on
+[GitHub](https://github.com/Crowforge-Studios/Commiter).
 
 ## License
 

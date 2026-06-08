@@ -176,7 +176,7 @@ pub fn stage_all_and_commit(repo_path: &str, message: &str) -> Result<String> {
     let tree_id = index.write_tree().context("Failed to write tree")?;
     let tree = repo.find_tree(tree_id).context("Failed to find tree")?;
 
-    let sig = get_signature(&repo);
+    let sig = get_signature(&repo)?;
 
     let parents: Vec<git2::Commit> = if let Ok(head) = repo.head() {
         if let Some(target) = head.target() {
@@ -240,7 +240,7 @@ pub fn detect_current_version() -> Option<String> {
 
 /// Produce a git signature by reading the user's git config, falling back to a
 /// sensible default if the config is missing.
-fn get_signature(repo: &Repository) -> Signature<'static> {
+fn get_signature(repo: &Repository) -> Result<Signature<'static>> {
     let name = repo
         .config()
         .ok()
@@ -251,7 +251,7 @@ fn get_signature(repo: &Repository) -> Signature<'static> {
         .ok()
         .and_then(|c| c.get_string("user.email").ok())
         .unwrap_or_else(|| "commiter@local".to_string());
-    Signature::now(&name, &email).expect("Failed to create git signature")
+    Signature::now(&name, &email).context("Failed to create git signature")
 }
 
 // Manual semver parse to avoid adding a semver dependency.

@@ -85,22 +85,39 @@ pub fn generate_commit_message(
     };
 
     // Enforce 90-char maximum on the first line (subject), breaking at word boundary.
-    if let Some(first_newline) = message.find('\n') {
-        let subject = &message[..first_newline];
-        let rest = &message[first_newline..];
-        if subject.len() > 90 {
-            let cutoff = subject[..90].rfind(' ').unwrap_or(90);
-            message = format!("{}{}", &subject[..cutoff], rest);
-        }
-    } else if message.len() > 90 {
-        let cutoff = message[..90].rfind(' ').unwrap_or(90);
-        message = message[..cutoff].to_string();
-    }
+    truncate_subject(&mut message);
 
     Ok(GenerationResult {
         message,
         suggested_version,
     })
+}
+
+fn char_boundary(s: &str, max_byte: usize) -> usize {
+    if s.len() <= max_byte {
+        return s.len();
+    }
+    let mut b = max_byte;
+    while !s.is_char_boundary(b) {
+        b -= 1;
+    }
+    b
+}
+
+fn truncate_subject(message: &mut String) {
+    if let Some(first_newline) = message.find('\n') {
+        let subject = &message[..first_newline];
+        let rest = &message[first_newline..];
+        if subject.len() > 90 {
+            let end = char_boundary(subject, 90);
+            let cutoff = subject[..end].rfind(' ').unwrap_or(end);
+            *message = format!("{}{}", &subject[..cutoff], rest);
+        }
+    } else if message.len() > 90 {
+        let end = char_boundary(message, 90);
+        let cutoff = message[..end].rfind(' ').unwrap_or(end);
+        *message = message[..cutoff].to_string();
+    }
 }
 
 /// Parse the response: "<subject>\n<body>\nNext version: <ver>"

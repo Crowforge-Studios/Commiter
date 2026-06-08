@@ -48,6 +48,7 @@ pub struct App {
     pub show_file_list: bool,
     pub editing: bool,
     pub cursor_pos: usize,
+    pub current_version: Option<String>,
 }
 
 impl App {
@@ -87,6 +88,7 @@ impl App {
                     show_file_list: true,
                     editing: false,
                     cursor_pos: 0,
+                    current_version,
                 }
             }
             Err(e) => Self {
@@ -103,6 +105,7 @@ impl App {
                 show_file_list: true,
                 editing: false,
                 cursor_pos: 0,
+                current_version: None,
             },
         }
     }
@@ -375,15 +378,12 @@ impl App {
                         Span::styled(ver, Style::default().fg(Color::Magenta).bold()),
                     ]);
                     f.render_widget(Paragraph::new(line), area);
-                } else if self.repo_info.is_some() {
-                    let version = crate::git::detect_current_version();
-                    if let Some(ref ver) = version {
-                        let line = Line::from(vec![
-                            Span::styled("Version: ", Style::default().dim()),
-                            Span::styled(ver, Style::default().fg(Color::Blue)),
-                        ]);
-                        f.render_widget(Paragraph::new(line), area);
-                    }
+                } else if let Some(ref ver) = self.current_version {
+                    let line = Line::from(vec![
+                        Span::styled("Version: ", Style::default().dim()),
+                        Span::styled(ver, Style::default().fg(Color::Blue)),
+                    ]);
+                    f.render_widget(Paragraph::new(line), area);
                 }
             }
         }
@@ -465,11 +465,11 @@ impl App {
                     if line.is_empty() {
                         visual_y += 1;
                     } else {
-                        visual_y += (line.len() as u16 + inner.width - 1) / inner.width;
+                        visual_y += (line.len() as u16).div_ceil(inner.width);
                     }
                 }
                 visual_y = visual_y.saturating_sub(1);
-                let last_line = text_before.split('\n').last().unwrap_or("");
+                let last_line = text_before.split('\n').next_back().unwrap_or("");
                 let visual_x = if inner.width > 0 {
                     (last_line.len() as u16) % inner.width
                 } else {
@@ -654,6 +654,7 @@ mod tests {
             show_file_list: true,
             editing: false,
             cursor_pos: 0,
+            current_version: None,
         }
     }
 

@@ -26,18 +26,23 @@ fn parse_args() {
                 i += 1;
                 std::env::set_var("COMMITER_DIFF_CUTOFF", &args[i]);
             }
+            "--version" | "-V" => {
+                println!("Commiter v{}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
             "--help" | "-h" => {
-                eprintln!("Commiter — AI-powered commit message generator");
-                eprintln!();
-                eprintln!("USAGE:");
-                eprintln!("  commiter [OPTIONS]");
-                eprintln!();
-                eprintln!("OPTIONS:");
-                eprintln!(
+                println!("Commiter — AI-powered commit message generator");
+                println!();
+                println!("USAGE:");
+                println!("  commiter [OPTIONS]");
+                println!();
+                println!("OPTIONS:");
+                println!(
                     "  --model <model>        AI model (default: opencode/deepseek-v4-flash-free)"
                 );
-                eprintln!("  --diff-cutoff <bytes>  Max diff bytes (default: 8192)");
-                eprintln!("  --help, -h             Print this help");
+                println!("  --diff-cutoff <bytes>  Max diff bytes (default: 8192)");
+                println!("  --version, -V         Print version and exit");
+                println!("  --help, -h             Print this help");
                 std::process::exit(0);
             }
             _ => {}
@@ -90,6 +95,7 @@ fn start_pregen(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
     spawn_ai_task(
         info.combined_diff.clone(),
         info.truncated,
+        app.current_version.clone(),
         tx,
         false,
     );
@@ -98,10 +104,10 @@ fn start_pregen(app: &mut App, tx: &mpsc::Sender<AppEvent>) {
 fn spawn_ai_task(
     diff: String,
     truncated: bool,
+    current_version: Option<String>,
     tx: &mpsc::Sender<AppEvent>,
     copy_to_clip: bool,
 ) {
-    let current_version = git::detect_current_version();
     let tx = tx.clone();
     thread::spawn(move || {
         let result =
@@ -200,10 +206,10 @@ fn run_app(
                     KeyCode::F(1) => {
                         app.show_file_list = !app.show_file_list;
                     }
-                    KeyCode::Char('e' | 'E') => {
-                        if app.state == AppState::Ready && !app.commit_message.is_empty() {
-                            app.start_editing();
-                        }
+                    KeyCode::Char('e' | 'E')
+                        if app.state == AppState::Ready && !app.commit_message.is_empty() =>
+                    {
+                        app.start_editing();
                     }
                     KeyCode::Char('r' | 'R') => {
                         let allowed = matches!(
@@ -227,7 +233,7 @@ fn run_app(
                                 .as_ref()
                                 .map(|r| r.truncated)
                                 .unwrap_or(false);
-                            spawn_ai_task(diff, truncated, tx, true);
+                            spawn_ai_task(diff, truncated, app.current_version.clone(), tx, true);
                         }
                     }
                     KeyCode::Enter => {
@@ -262,7 +268,7 @@ fn run_app(
                                 .as_ref()
                                 .map(|r| r.truncated)
                                 .unwrap_or(false);
-                            spawn_ai_task(diff, truncated, tx, true);
+                            spawn_ai_task(diff, truncated, app.current_version.clone(), tx, true);
                         } else if app.can_commit() {
                             let msg = app.commit_message.clone();
                             let repo_path = app
