@@ -37,9 +37,7 @@ fn parse_args() {
                 println!("  commiter [OPTIONS]");
                 println!();
                 println!("OPTIONS:");
-                println!(
-                    "  --model <model>        AI model (default: opencode/deepseek-v4-flash-free)"
-                );
+                println!("  --model <model>        AI model (default: opencode/big-pickle)");
                 println!("  --diff-cutoff <bytes>  Max diff bytes (default: 8192)");
                 println!("  --version, -V         Print version and exit");
                 println!("  --help, -h             Print this help");

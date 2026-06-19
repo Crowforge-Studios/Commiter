@@ -3,7 +3,7 @@ use std::process::Command;
 /// Model to use for opencode CLI. Override via OPENCODE_MODEL env var.
 pub fn get_model() -> String {
     std::env::var("OPENCODE_MODEL")
-        .unwrap_or_else(|_| "opencode/deepseek-v4-flash-free".to_string())
+        .unwrap_or_else(|_| "opencode/big-pickle".to_string())
 }
 /// Result of AI commit message generation.
 pub struct GenerationResult {
